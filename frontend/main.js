@@ -1,33 +1,44 @@
 let socket;
-const log = (msg) => {
-  document.getElementById("log").textContent += msg + "\n";
-};
+let audioContext;
+let workletNode;
 
-document.getElementById("connectBtn").onclick = () => {
+async function startAudio() {
   socket = new WebSocket("ws://localhost:3001");
+  socket.binaryType = "arraybuffer";
 
   socket.onopen = () => {
-    log("Connected to backend");
+    console.log("WebSocket connected");
   };
 
-  socket.onmessage = (event) => {
-    log("From server: " + event.data);
+  audioContext = new AudioContext({ sampleRate: 16000 });
+
+  await audioContext.audioWorklet.addModule("audio-processor.js");
+
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const source = audioContext.createMediaStreamSource(stream);
+
+  workletNode = new AudioWorkletNode(audioContext, "audio-processor");
+
+  workletNode.port.onmessage = (event) => {
+    const float32Samples = event.data;
+    const pcm16 = floatTo16BitPCM(float32Samples);
+    socket.send(pcm16);
   };
 
-  socket.onclose = () => {
-    log("Disconnected from backend");
-  };
+  source.connect(workletNode);
 
-  socket.onerror = (err) => {
-    log("WebSocket error: " + err.message);
-  };
-};
+  console.log("Audio streaming started");
+}
 
-document.getElementById("sendBtn").onclick = () => {
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    log("Socket not connected");
-    return;
+function floatTo16BitPCM(float32Array) {
+  const buffer = new ArrayBuffer(float32Array.length * 2);
+  const view = new DataView(buffer);
+
+  let offset = 0;
+  for (let i = 0; i < float32Array.length; i++, offset += 2) {
+    let s = Math.max(-1, Math.min(1, float32Array[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
   }
-  socket.send("Hello from browser");
-  log("Sent: Hello from browser");
-};
+
+  return buffer;
+}
