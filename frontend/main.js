@@ -11,10 +11,15 @@ async function startAudio() {
   };
 
   audioContext = new AudioContext({ sampleRate: 16000 });
+  await audioContext.resume(); 
 
-  await audioContext.audioWorklet.addModule("audio-processor.js");
+  console.log("Loading worklet...");
+  await audioContext.audioWorklet.addModule("./audio-processor.js");
+  console.log("Worklet loaded");
 
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  console.log("Microphone permission granted");
+
   const source = audioContext.createMediaStreamSource(stream);
 
   workletNode = new AudioWorkletNode(audioContext, "audio-processor");
@@ -22,10 +27,14 @@ async function startAudio() {
   workletNode.port.onmessage = (event) => {
     const float32Samples = event.data;
     const pcm16 = floatTo16BitPCM(float32Samples);
-    socket.send(pcm16);
+
+    if (socket.readyState === WebSocket.OPEN) {
+      socket.send(pcm16);
+    }
   };
 
   source.connect(workletNode);
+  workletNode.connect(audioContext.destination);
 
   console.log("Audio streaming started");
 }

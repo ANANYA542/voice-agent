@@ -1,27 +1,44 @@
 const WebSocket = require("ws");
+const VAD = require("./vad");
 
-const wss = new WebSocket.Server({ port: 3001 });
+const PORT = 3001;
 
-console.log("WebSocket server running on ws://localhost:3001");
+const wss = new WebSocket.Server({ port: PORT });
+console.log(`WebSocket server listening on ws://localhost:${PORT}`);
 
 wss.on("connection", (ws) => {
-  console.log("Client connected");
+  const sessionId = Math.random().toString(36).slice(2, 8);
+  console.log(`[${sessionId}] Client connected`);
+
+  const vad = new VAD({
+    sampleRate: 16000,
+    frameDurationMs: 20,
+    speechMultiplier: 3.0,
+    silenceMultiplier: 1.5,
+    hangoverTimeMs: 600,
+    calibrationDurationMs: 1500
+  });
+
+  vad.on('calibration_complete', (data) => {
+    console.log(`\n[${sessionId}] VAD calibration complete`);
+    console.log(`[${sessionId}] noiseFloor=${data.noiseFloor.toFixed(5)}`);
+    console.log(`[${sessionId}] speechThreshold=${data.speechThreshold.toFixed(5)}`);
+    console.log(`[${sessionId}] silenceThreshold=${data.silenceThreshold.toFixed(5)}`);
+  });
+
+  vad.on('speech_start', () => {
+    console.log(`[${sessionId}] speech_start`);
+  });
+
+  vad.on('speech_stop', () => {
+    console.log(`[${sessionId}] speech_stop`);
+  });
 
   ws.on("message", (data) => {
-    const pcm = new Int16Array(data.buffer);
-    const energy = computeEnergy(pcm);
-    console.log("Frame energy:", energy.toFixed(5));
+    vad.process(data);
   });
 
   ws.on("close", () => {
-    console.log("Client disconnected");
+    console.log(`[${sessionId}] Client disconnected`);
   });
 });
-
-function computeEnergy(pcm) {
-  let sum = 0;
-  for (let i = 0; i < pcm.length; i++) {
-    sum += pcm[i] * pcm[i];
-  }
-  return Math.sqrt(sum / pcm.length) / 32768;
-}
