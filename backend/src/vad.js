@@ -11,8 +11,10 @@ class VAD extends EventEmitter {
         // before considering speech to have ended.
         this.speechMultiplier = options.speechMultiplier || 3.0;
         this.silenceMultiplier = options.silenceMultiplier || 1.5;
-        this.minSpeechFrames = options.minSpeechFrames || 4;   // N ≈ 80ms
-        this.minSilenceFrames = options.minSilenceFrames || 200; // Number of silent frames required to stop speech
+        // Calculate frames from time parameters if not explicitly set
+        const hangoverTimeMs = options.hangoverTimeMs || 2000; // Default 2s for stable turn-taking
+        this.minSpeechFrames = options.minSpeechFrames || 15;  // N ≈ 300ms (Robust Spike Rejection)
+        this.minSilenceFrames = options.minSilenceFrames || Math.ceil(hangoverTimeMs / this.frameDurationMs);
         this.calibrationDurationMs = options.calibrationDurationMs || 2000;
         
         // Internal state

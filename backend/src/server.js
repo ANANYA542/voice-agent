@@ -1,6 +1,7 @@
 require("dotenv").config();
 const WebSocket = require("ws");
 const { createDeepgramStream } = require("./stt/deepgram");
+const { callGroq } = require("./llm/groq");
 const VAD = require("./vad");
 
 const PORT = 3001;
@@ -9,147 +10,283 @@ const FRAME_SIZE_BYTES = 640; // 20ms @ 16kHz, mono, 16-bit PCM
 const wss = new WebSocket.Server({ port: PORT });
 console.log(`WebSocket server listening on ws://localhost:${PORT}`);
 
+function log(event, payload = {}) {
+  console.log(
+    JSON.stringify({
+      ts: Date.now(),
+      event,
+      ...payload,
+    })
+  );
+}
+
+function validateConversation(conversation) {
+  return conversation.filter(msg => 
+    msg && 
+    typeof msg === 'object' && 
+    (msg.role === 'user' || msg.role === 'assistant' || msg.role === 'system') &&
+    typeof msg.content === 'string' &&
+    msg.content.trim().length > 0
+  );
+}
+
+async function finalizeTurn(session, ws) {
+  if (session.turnLocked) return;
+  session.turnLocked = true;
+  if (session.turnTimer) {
+    clearTimeout(session.turnTimer);
+    session.turnTimer = null;
+  }
+  session.awaitingFinalSTT = false;
+
+  const userText = session.finalTranscript.trim();
+  session.finalTranscript = "";
+
+  if (!userText) {
+    log("empty_transcript", { sessionId: session.id });
+    session.turnLocked = false;
+    return;
+  }
+
+  const sttLatency = Date.now() - session.metrics.sttStart;
+  log("user_transcript", { sessionId: session.id, text: userText, sttLatency });
+
+  session.conversation.push({ role: "user", content: userText });
+
+  ws.send(JSON.stringify({
+    type: "user_transcript",
+    text: userText,
+  }));
+
+  session.metrics.llmStart = Date.now();
+  log("groq_request_start", { sessionId: session.id });
+
+  try {
+    const safeHistory = validateConversation(session.conversation);
+    const messages = [
+      { role: "system", content: session.context },
+      ...safeHistory,
+    ];
+
+    log("groq_payload", {
+      sessionId: session.id,
+      messages: messages.length,
+    });
+
+    const response = await callGroq(messages);
+
+    const llmLatency = Date.now() - session.metrics.llmStart;
+
+    log("groq_response", {
+      sessionId: session.id,
+      text: response.text,
+      llmLatency,
+    });
+
+    session.conversation.push({
+      role: "assistant",
+      content: response.text,
+    });
+
+    ws.send(JSON.stringify({
+      type: "ai_response",
+      text: response.text,
+    }));
+
+    const e2eLatency = Date.now() - session.metrics.sttStart;
+    log("turn_complete", {
+      sessionId: session.id,
+      sttLatency,
+      llmLatency,
+      e2eLatency,
+    });
+  } catch (err) {
+    log("groq_error", { sessionId: session.id, error: err.message });
+  }
+  session.turnLocked = false;
+}
+
 wss.on("connection", (ws) => {
   const sessionId = Math.random().toString(36).slice(2, 8);
-  console.log(`[${sessionId}] Client connected`);
 
-  let deepgramStream = null;
-  let finalTranscript = "";
-  let deepgramReady = false;
+    const session = {
+    id: sessionId,
+    conversation: [],
+    deepgramStream: null,
+    deepgramReady: false,
+    finalTranscript: "",
+    audioBuffer: Buffer.alloc(0),
+    audioBacklog: [], 
+    awaitingFinalSTT: false,
+    turnTimer: null,
+    turnLocked: false,
+    context: "You are a helpful, concise voice assistant.",
+    metrics: {
+      sttStart: 0,
+      llmStart: 0,
+    },
+  };
 
-  let audioBuffer = Buffer.alloc(0); // buffer for assembling 20ms frames
+  log("client_connected", { sessionId });
 
   const vad = new VAD({
     sampleRate: 16000,
     frameDurationMs: 20,
-    speechMultiplier: 2.2,   // lower = more sensitive to normal voice
+    speechMultiplier: 2.2,
     silenceMultiplier: 1.3,
-    hangoverTimeMs: 600,
+    hangoverTimeMs: 800, // 800ms silence required to stop
+    // minSpeechFrames defaults to 15 (300ms) in VAD class now
     calibrationDurationMs: 1500,
   });
 
+  session.vad = vad;
+
   vad.on("calibration_complete", (data) => {
-    console.log(`\n[${sessionId}] VAD calibration complete`);
-    console.log(`[${sessionId}] noiseFloor=${data.noiseFloor.toFixed(2)}`);
-    console.log(`[${sessionId}] speechThreshold=${data.speechThreshold.toFixed(2)}`);
-    console.log(`[${sessionId}] silenceThreshold=${data.silenceThreshold.toFixed(2)}`);
+    log("vad_calibration_complete", {
+      sessionId,
+      noiseFloor: data.noiseFloor,
+      speechThreshold: data.speechThreshold,
+      silenceThreshold: data.silenceThreshold,
+    });
   });
 
-
   vad.on("speech_start", () => {
-    console.log(`[${sessionId}] speech_start`);
+    if (session.turnTimer) {
+      clearTimeout(session.turnTimer);
+      session.turnTimer = null;
+      session.awaitingFinalSTT = false;
+    }
 
-    // Capture specific session instances to prevent overlap
-    const currentStream = createDeepgramStream();
-    deepgramStream = currentStream;
-    
-    finalTranscript = "";
-    deepgramReady = false;
-    let packetQueue = [];
+    log("speech_start", { sessionId });
+
+    const dgStream = createDeepgramStream();
+    session.deepgramStream = dgStream;
+    session.deepgramReady = false;
+    session.finalTranscript = "";
+    // Keep backlog until injected; clear only after stream opens
+    session.metrics.sttStart = Date.now();
+
+    // Start with the backlog so we don't lose the first syllable
+    const packetQueue = [...session.audioBacklog];
+    session.audioBacklog = [];
     let pendingClose = false;
 
-    // Attach queue locally to this closure, so we don't need to put it on the object
-    // But we need to access it in the message handler... 
-    // We can use the 'deepgramStream' reference in the main scope, 
-    // but we need to know WHICH queue belongs to it. 
-    // Actually, simply attaching it to the stream object is the easiest way to bridge scopes.
-    currentStream._packetQueue = packetQueue;
+    log("backlog_injected", { sessionId, packets: packetQueue.length });
 
-    currentStream.on("open", () => {
-      deepgramReady = true;
-      console.log(`[${sessionId}] 🎤 Deepgram connection opened`);
-      
-      if (currentStream._packetQueue && currentStream._packetQueue.length > 0) {
-        console.log(`[${sessionId}] Flushing ${currentStream._packetQueue.length} buffered packets`);
-        currentStream._packetQueue.forEach(packet => currentStream.send(packet));
-        currentStream._packetQueue = [];
+    dgStream._packetQueue = packetQueue;
+    dgStream._markPendingClose = () => {
+      pendingClose = true;
+    };
+
+    dgStream.on("open", () => {
+      session.deepgramReady = true;
+      log("deepgram_open", { sessionId });
+
+      if (dgStream._packetQueue.length > 0) {
+        log("deepgram_flush_queue", {
+          sessionId,
+          packets: dgStream._packetQueue.length,
+        });
+        dgStream._packetQueue.forEach((pkt) => dgStream.send(pkt));
+        dgStream._packetQueue = [];
       }
-      
-      // If we received a stop signal while connecting, finish now that we flushed
+
       if (pendingClose) {
-         console.log(`[${sessionId}] Executing pending stream finish`);
-         currentStream.finish();
-         pendingClose = false;
+        dgStream.finish();
+        pendingClose = false;
       }
     });
 
-    currentStream.on("close", () => {
-      console.log(`[${sessionId}] Deepgram connection closed`);
+    dgStream.on("close", () => {
+      log("deepgram_closed", { sessionId });
     });
 
-    currentStream.on("error", (err) => {
-      console.error(`[${sessionId}] Deepgram error:`, err);
+    dgStream.on("error", (err) => {
+      log("deepgram_error", { sessionId, error: err.message });
     });
 
-    // Handle Transcripts
-    currentStream.on("Results", (data) => {
+    dgStream.on("Results", (data) => {
       const alt = data.channel?.alternatives?.[0];
       if (!alt || !alt.transcript) return;
 
       if (data.is_final) {
-        finalTranscript += alt.transcript + " ";
-        console.log(`[${sessionId}] [STT final]:`, alt.transcript);
+        session.finalTranscript += alt.transcript + " ";
+        log("stt_final", { sessionId, text: alt.transcript });
+
+        // Trigger LLM immediately after final STT if silence was already detected
+        if (session.awaitingFinalSTT && !session.turnLocked) {
+          session.awaitingFinalSTT = false;
+          finalizeTurn(session, ws);
+        }
       } else {
-        console.log(`[${sessionId}] [STT partial]:`, alt.transcript);
+        log("stt_partial", { sessionId, text: alt.transcript });
       }
     });
 
-    console.log(`[${sessionId}] 🎤 Deepgram STT started`);
-    
-    // Attach pendingClose logic to the stream object for speech_stop to access
-    currentStream._markPendingClose = () => { pendingClose = true; };
+    log("deepgram_started", { sessionId });
   });
 
   vad.on("speech_stop", () => {
-    console.log(`[${sessionId}] speech_stop`);
+    log("speech_stop", { sessionId });
 
-    if (deepgramStream) {
-      const streamToClose = deepgramStream;
-      // Detach global reference so new audio doesn't go here
-      deepgramStream = null;
-      deepgramReady = false;
+    session.awaitingFinalSTT = true;
 
-      // Graceful shutdown logic
-      if (streamToClose.getReadyState() === 1) { // 1 = OPEN
-         streamToClose.finish();
-      } else {
-         // Not open yet? Mark it to finish as soon as it opens
-         console.log(`[${sessionId}] Stream not open yet, marking for pending close`);
-         if (streamToClose._markPendingClose) streamToClose._markPendingClose();
+    // Short silence window: finalize fast if STT final does not arrive
+    session.turnTimer = setTimeout(() => {
+      session.turnTimer = null;
+      if (!session.turnLocked) {
+        finalizeTurn(session, ws);
       }
-      
-      console.log(
-        `[${sessionId}] 📝 Final Transcript:`,
-        finalTranscript.trim()
-      );
-      finalTranscript = "";
+    }, 800);
+
+    const dgStream = session.deepgramStream;
+    session.deepgramStream = null;
+    session.deepgramReady = false;
+
+    if (dgStream) {
+      if (dgStream.getReadyState() === 1) {
+        dgStream.finish();
+      } else {
+        dgStream._markPendingClose?.();
+      }
     }
   });
 
   ws.on("message", (data) => {
-    // Accumulate small chunks into a proper 20ms frame
-    audioBuffer = Buffer.concat([audioBuffer, Buffer.from(data)]);
+    session.audioBuffer = Buffer.concat([
+      session.audioBuffer,
+      Buffer.from(data),
+    ]);
 
-    while (audioBuffer.length >= FRAME_SIZE_BYTES) {
-      const frame = audioBuffer.slice(0, FRAME_SIZE_BYTES);
-      audioBuffer = audioBuffer.slice(FRAME_SIZE_BYTES);
+    while (session.audioBuffer.length >= FRAME_SIZE_BYTES) {
+      const frame = session.audioBuffer.slice(0, FRAME_SIZE_BYTES);
+      session.audioBuffer = session.audioBuffer.slice(FRAME_SIZE_BYTES);
 
-      // Feed VAD
-      vad.process(frame);
+      // Update Backlog (keep last 30 frames = 600ms)
+      session.audioBacklog.push(frame);
+      if (session.audioBacklog.length > 30) {
+        session.audioBacklog.shift();
+      }
 
-      // Feed Deepgram only while speaking
-      if (vad.state === "SPEAKING" && deepgramStream) {
-         if (deepgramReady) {
-            deepgramStream.send(frame);
-            // console.log(`[${sessionId}] Sent ${frame.length} bytes to Deepgram`);
-         } else if (deepgramStream._packetQueue) {
-            deepgramStream._packetQueue.push(frame); // Buffer
-         }
+      if (!session.turnLocked) {
+        session.vad.process(frame);
+      }
+
+      if (
+        session.vad.state === "SPEAKING" &&
+        session.deepgramStream &&
+        frame.length === FRAME_SIZE_BYTES
+      ) {
+        if (session.deepgramReady) {
+          session.deepgramStream.send(frame);
+        } else if (session.deepgramStream._packetQueue) {
+          session.deepgramStream._packetQueue.push(frame);
+        }
       }
     }
   });
 
   ws.on("close", () => {
-    console.log(`[${sessionId}] Client disconnected`);
+    log("client_disconnected", { sessionId });
   });
 });
