@@ -1,117 +1,170 @@
-# Voice Agent 
-# Milestone 1: Transport Layer
-The first step of this project is to build a reliable real-time communication channel between the browser and the backend. A voice agent is fundamentally a streaming system: user audio must flow continuously from the client to the server, and AI-generated audio must flow back. Before adding any speech or AI logic, we establish this transport layer.
-I am  using WebSockets because they provide a persistent, bidirectional connection that stays open. Unlike HTTP, which is request–response based, WebSockets allow both the browser and the backend to send data at any time. This makes them ideal for real-time audio streaming.
+# Voice Agent
 
-In this milestone:
-- A Node.js backend runs a WebSocket server.
-- A browser frontend connects to it.
-- Messages can be sent and received in real time.
-- We validate bidirectional communication using simple text messages.
-# Current architecture:
-- Browser  ⇄  WebSocket  ⇄  Node.js Backend
+This project implements a low-latency, production-style voice agent using a fully streaming and temporal pipeline.  
+The goal is to build a system that behaves like a real conversational assistant: stable, noise-resilient, and responsive to human speech patterns.
 
-At this stage, the connection only carries text. In the next steps, this same channel will be used to stream raw audio frames from the microphone and audio output from the TTS system. This transport layer is the foundation on which the entire voice pipeline (Noise Suppression, VAD, STT, LLM, TTS) will be built.
-## Milestone 2 – Real-time Audio Streaming
+The pipeline is built incrementally through milestones, each one solving a real engineering problem in streaming audio systems.
 
-The browser captures microphone audio using the Web Audio API and AudioWorklet,
-converts Float32 PCM samples into 16-bit PCM, and streams them over WebSocket to
-the backend in real time. The backend successfully receives and decodes audio
-frames and computes audio energy, enabling the foundation for VAD and turn
-detection.
-## Milestone 3 – Voice Activity Detection (VAD)
+Core pipeline:
 
-After enabling real-time audio streaming, a custom Voice Activity Detection (VAD) system was added to determine when the user starts and stops speaking.
+Browser Microphone  
+→ Audio Processing  
+→ VAD (Temporal)  
+→ Audio Backlog  
+→ Streaming STT (Deepgram)  
+→ Turn Finalization  
+→ LLM Reasoning (Groq)  
+→ (TTS will be added next)
 
-The VAD is implemented as a deterministic, frame-based state machine. Each audio frame represents 20ms of sound, and all decisions are made using frame counts instead of timers. This makes the system predictable, stable, and easy to test.
+---
+
+## Milestone 1 – Transport Layer (WebSocket)
+
+Goal: Establish a reliable real-time communication channel.
+
+- WebSocket server in Node.js
+- Persistent bidirectional connection
+- Used for both audio streaming and AI responses
+- Forms the backbone of the entire system
+
+Architecture:
+```
+Browser ⇄ WebSocket ⇄ Backend
+```
+
+---
+
+## Milestone 2 – Real-Time Audio Streaming
+
+Goal: Stream microphone audio continuously.
+
+- Browser captures audio using AudioWorklet
+- Float32 samples converted to PCM16
+- Frames streamed every 20ms (640 bytes)
+- Backend receives raw audio and computes energy levels
+
+This milestone turns the system into a true streaming pipeline.
+
+---
+
+## Milestone 3 – Temporal Voice Activity Detection (VAD)
+
+Problem:
+Reactive VAD systems fail in real environments:
+- Keyboard clicks trigger speech
+- Breathing ends speech
+- Speech gets chopped
+
+Solution:
+A fully temporal, frame-based VAD state machine.
 
 States:
-- **CALIBRATING**: Estimates background noise and sets detection thresholds  
-- **SILENCE**: Listens for speech  
-- **SPEAKING**: Tracks active speech and detects its end  
+- CALIBRATING → SILENCE → SPEAKING
 
 Speech start:
-- Triggered after **4 consecutive high-energy frames**
-- ≈ 80ms of sustained speech  
-- Prevents false triggers from short noises  
+- Triggered after **15 consecutive speech frames**
+- ≈ 300ms sustained energy
+- Filters keyboard clicks and mic bumps
 
 Speech stop:
-- Triggered after **250 consecutive silent frames**
-- ≈ 5 seconds of silence  
-- Prevents cutting off natural pauses  
+- Triggered after **100 consecutive silent frames**
+- ≈ 2 seconds silence
+- Matches natural human pauses
 
-Debouncing:
-- Short noise spikes or brief silence drops are ignored  
-- Ensures stable turn detection  
+Design principles:
+- Frame-based (no timers)
+- Deterministic behavior
+- Noise-resilient
+- Stable turn boundaries
 
-Deterministic design:
-- Uses only frame counters  
-- No timers or race conditions  
-- Fully reproducible behavior  
+This transformed the system from reactive to time-aware.
 
-Verification:
-The VAD is verified using: backend/tests/verify_vad.js
-This script simulates different energy patterns and validates correct speech start, speech stop, and noise handling.  
-The file `backend/verify_vad.js` is deprecated and should not be used.
+---
 
-Current pipeline:Browser Mic → AudioWorklet → PCM16 → WebSocket → Backend → Energy → VAD
-This completes the foundation required before adding STT, LLM, and TTS.
-## Milestone 4 – Streaming Speech-to-Text (STT) with Deepgram
+## Milestone 4 – Streaming STT with Deepgram
 
-In this milestone, real-time Speech-to-Text (STT) was integrated using Deepgram’s streaming API.  
-The system now converts live user speech into text with low latency while the user is still speaking.
+Goal: Convert speech to text in real time.
 
-This completes the pipeline from raw audio to structured text:
-How it works:
-
-When the VAD emits `speech_start`, a new Deepgram live streaming connection is created.  
-Audio frames are then streamed continuously to Deepgram in real time.  
-When the VAD emits `speech_stop`, the Deepgram stream is gracefully closed, allowing it to flush and return the final transcript.
+Flow:
+- On `speech_start` → open Deepgram stream
+- Stream audio frames
+- Receive partial transcripts during speech
+- On `speech_stop` → close stream
+- Receive final transcript
 
 Deepgram configuration:
-- Encoding: `linear16`
-- Sample rate: `16000 Hz`
-- Channels: `1 (mono)`
-- Model: `nova-2`
-- Interim results enabled
-- Smart formatting enabled
+- 16kHz
+- mono
+- linear16
+- nova-2
+- interim results enabled
 
-Features implemented:
+Features:
+- Audio buffering before socket open
+- Clean stream shutdown
+- Partial + final transcripts
+- Low latency transcription
 
-- Real-time audio streaming to Deepgram
-- Automatic STT session lifecycle based on VAD events
-- Audio buffering before Deepgram socket opens
-- Buffered audio flushing after connection is ready
-- Partial transcripts during speech
-- Final transcript after speech completion
-- Clean connection close and metadata handling
+---
 
-Example flow:
-speech_start
-→ Deepgram connection opens
-→ Buffered audio flushed
-→ Audio frames streamed
-→ [STT partial]: “Hello”
-→ [STT final]: “Hello, how are you?”
-speech_stop
-→ Final transcript assembled
-→ Deepgram connection closed
-Observed behavior:
-- Partial transcripts arrive within a few hundred milliseconds
-- Final transcript arrives shortly after silence is detected
-- Audio is streamed in fixed 20ms (640 byte) frames
-- The pipeline remains fully real-time and low-latency
+## Rolling Audio Backlog (Critical Improvement)
 
-This milestone establishes a production-grade, streaming STT pipeline that is:
+Problem:
+Temporal VAD delays speech start → first syllable is lost.
 
-- Low latency
-- Deterministic
-- Cost efficient (VAD-gated)
-- Suitable for live captions and conversational agents
+Solution:
+A rolling 600ms audio backlog.
 
-With this, the system now has a complete sensory pipeline: Audio → VAD → STT → Text
-This forms the foundation required to integrate:
-- LLM reasoning
-- Tool calling (search, context updates)
-- Text-to-Speech (TTS)
-- Barge-in and conversational flow
+How it works:
+- Backend always stores last 600ms of audio
+- When speech_start is confirmed:
+  - backlog is injected first
+  - live streaming continues
+
+Result:
+- Zero audio loss
+- No latency increase
+- Enables careful VAD without cutting speech
+
+This makes the pipeline truly temporal-aware.
+
+---
+
+## Milestone 5 – Turn Detection + LLM Integration (Groq)
+
+This converts STT into an actual conversational agent.
+
+Flow:
+Audio → VAD → Backlog → STT → Turn Finalization → LLM
+
+Key improvements:
+
+1. One LLM call per user turn  
+   - Triggered only after:
+     - Final transcript
+     - Sustained silence
+   - Prevents duplicate or premature requests
+
+2. Turn locking  
+   - While Groq is processing:
+     - No new STT sessions start
+   - Eliminates race conditions
+
+3. Conversation sanitation  
+   - Removes:
+     - empty transcripts
+     - invalid roles
+     - malformed messages  
+   - Prevents poisoned LLM history
+
+4. Stable conversational loop  
+   - Speech → exactly one LLM call → response
+
+This mirrors real production voice agents.
+
+---
+
+
+
+
+
