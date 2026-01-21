@@ -3,14 +3,17 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
+ 
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node src/server.js",
+    "test-groq": "node test-groq.js"
   },
   "author": "",
   "license": "ISC",
   "dependencies": {
     "@deepgram/sdk": "^4.11.3",
     "dotenv": "^17.2.3",
+    "groq-sdk": "^0.37.0",
     "ws": "^8.19.0"
   }
 }
