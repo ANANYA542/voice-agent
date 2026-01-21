@@ -56,3 +56,62 @@ The file `backend/verify_vad.js` is deprecated and should not be used.
 
 Current pipeline:Browser Mic → AudioWorklet → PCM16 → WebSocket → Backend → Energy → VAD
 This completes the foundation required before adding STT, LLM, and TTS.
+## Milestone 4 – Streaming Speech-to-Text (STT) with Deepgram
+
+In this milestone, real-time Speech-to-Text (STT) was integrated using Deepgram’s streaming API.  
+The system now converts live user speech into text with low latency while the user is still speaking.
+
+This completes the pipeline from raw audio to structured text:
+How it works:
+
+When the VAD emits `speech_start`, a new Deepgram live streaming connection is created.  
+Audio frames are then streamed continuously to Deepgram in real time.  
+When the VAD emits `speech_stop`, the Deepgram stream is gracefully closed, allowing it to flush and return the final transcript.
+
+Deepgram configuration:
+- Encoding: `linear16`
+- Sample rate: `16000 Hz`
+- Channels: `1 (mono)`
+- Model: `nova-2`
+- Interim results enabled
+- Smart formatting enabled
+
+Features implemented:
+
+- Real-time audio streaming to Deepgram
+- Automatic STT session lifecycle based on VAD events
+- Audio buffering before Deepgram socket opens
+- Buffered audio flushing after connection is ready
+- Partial transcripts during speech
+- Final transcript after speech completion
+- Clean connection close and metadata handling
+
+Example flow:
+speech_start
+→ Deepgram connection opens
+→ Buffered audio flushed
+→ Audio frames streamed
+→ [STT partial]: “Hello”
+→ [STT final]: “Hello, how are you?”
+speech_stop
+→ Final transcript assembled
+→ Deepgram connection closed
+Observed behavior:
+- Partial transcripts arrive within a few hundred milliseconds
+- Final transcript arrives shortly after silence is detected
+- Audio is streamed in fixed 20ms (640 byte) frames
+- The pipeline remains fully real-time and low-latency
+
+This milestone establishes a production-grade, streaming STT pipeline that is:
+
+- Low latency
+- Deterministic
+- Cost efficient (VAD-gated)
+- Suitable for live captions and conversational agents
+
+With this, the system now has a complete sensory pipeline: Audio → VAD → STT → Text
+This forms the foundation required to integrate:
+- LLM reasoning
+- Tool calling (search, context updates)
+- Text-to-Speech (TTS)
+- Barge-in and conversational flow
