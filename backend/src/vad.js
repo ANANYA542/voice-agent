@@ -1,136 +1,114 @@
-const { EventEmitter } = require('events');
+const EventEmitter = require("events");
 
 class VAD extends EventEmitter {
-    constructor(options = {}) {
-        super();
-        this.sampleRate = options.sampleRate || 16000;
-        this.frameDurationMs = options.frameDurationMs || 20;
-        
-        // Tunable parameters for VAD behavior.
-        // These control how quickly speech is detected and how long silence is required
-        // before considering speech to have ended.
-        this.speechMultiplier = options.speechMultiplier || 3.0;
-        this.silenceMultiplier = options.silenceMultiplier || 1.5;
-        // Calculate frames from time parameters if not explicitly set
-        const hangoverTimeMs = options.hangoverTimeMs || 2000; // Default 2s for stable turn-taking
-        this.minSpeechFrames = options.minSpeechFrames || 15;  // N ≈ 300ms (Robust Spike Rejection)
-        this.minSilenceFrames = options.minSilenceFrames || Math.ceil(hangoverTimeMs / this.frameDurationMs);
-        this.calibrationDurationMs = options.calibrationDurationMs || 2000;
-        
-        // Internal state
-        this.state = 'CALIBRATING'; // Possible states: CALIBRATING → SILENCE → SPEAKING
-        this.samplesPerFrame = Math.floor(this.sampleRate * (this.frameDurationMs / 1000));
-        
-        // Energy tracking and smoothing
-        this.energyAlpha = 0.3; // Smoothing factor
-        this.smoothedEnergy = 0;
-        this.noiseFloor = 0;
-        this.calibrationEnergies = [];
-        this.elapsedCalibrationTime = 0;
-        
-        // Thresholds
-        this.speechThreshold = 0;
-        this.silenceThreshold = 0;
-        
-        // Frame counters used for debouncing and stability
-        this.speechFrameCount = 0;   // Number of consecutive frames above speechThreshold
-        this.silenceFrameCount = 0;  // Number of consecutive frames below silenceThreshold
-        
-        console.log(`[VAD] Initialized. Frame: ${this.frameDurationMs}ms, Start: ${this.minSpeechFrames} frames, Stop: ${this.minSilenceFrames} frames`);
+  constructor(options) {
+    super();
+
+    // Settings
+    this.sampleRate = options.sampleRate || 16000;
+    this.frameMs = options.frameDurationMs || 20;
+
+    // Thresholds - Calibrated manually
+    this.energyThreshold = 500; // start low
+    this.speechThreshold = 2000;
+    this.silenceThreshold = 800;
+    
+    this.speechMultiplier = 2.2;
+    this.silenceMultiplier = 1.2;
+
+    this.state = "CALIBRATING"; // start by listening to background noise
+
+    // Counters
+    this.speechCount = 0;
+    this.silenceCount = 0;
+    this.calibrationCount = 0;
+
+    // Tuning
+    // need 15 frames (300ms) to say "speech started"
+    this.minSpeechFrames = 15; 
+    
+    // hold on for 2.5s after silence to not cut off
+    this.hangoverMs = options.hangoverTimeMs || 2500;
+    this.hangoverFrames = this.hangoverMs / this.frameMs;
+
+    this.calibrationMax = 75; // frames to calibrate (1.5s)
+    this.noiseLevels = [];
+  }
+
+  process(frameBuffer) {
+    const energy = this.calculateRMS(frameBuffer);
+
+    if (this.state === "CALIBRATING") {
+      this.doCalibration(energy);
+    } else if (this.state === "SILENCE") {
+      this.checkSilence(energy);
+    } else if (this.state === "SPEAKING") {
+      this.checkSpeaking(energy);
+    }
+  }
+
+  calculateRMS(buffer) {
+    let sum = 0;
+    // 16-bit audio, so step by 2
+    for (let i = 0; i < buffer.length; i += 2) {
+      const val = buffer.readInt16LE(i);
+      sum += val * val;
+    }
+    return Math.sqrt(sum / (buffer.length / 2));
+  }
+
+  doCalibration(energy) {
+    this.noiseLevels.push(energy);
+    this.calibrationCount++;
+
+    if (this.calibrationCount >= this.calibrationMax) {
+      console.log("Calibration done!");
+      
+      const sum = this.noiseLevels.reduce((a, b) => a + b, 0);
+      const avg = sum / this.noiseLevels.length;
+
+      this.noiseFloor = avg;
+      
+      // Set thresholds based on noise
+      this.speechThreshold = avg * this.speechMultiplier;
+      this.silenceThreshold = avg * this.silenceMultiplier;
+
+      // make sure it's not too sensitive
+      if (this.speechThreshold < 200) this.speechThreshold = 200;
+
+      this.state = "SILENCE";
+      this.emit("calibration_complete", { noiseFloor: avg });
+    }
+  }
+
+  checkSilence(energy) {
+    if (energy > this.speechThreshold) {
+      this.speechCount++;
+    } else {
+      this.speechCount = Math.max(0, this.speechCount - 1);
     }
 
-    process(buffer) {
-        // Convert raw PCM buffer into 16‑bit audio samples
-        const samples = new Int16Array(buffer.buffer, buffer.byteOffset, buffer.byteLength / 2);
-        
-        const energy = this.calculateRms(samples);
-        this.smoothedEnergy = this.energyAlpha * this.smoothedEnergy + (1 - this.energyAlpha) * energy;
-        
-        // Uncomment this line when tuning thresholds or debugging detection behavior
-        // console.log(`[VAD] raw=${energy.toFixed(5)} smooth=${this.smoothedEnergy.toFixed(5)} state=${this.state}`);
+    if (this.speechCount >= this.minSpeechFrames) {
+      this.state = "SPEAKING";
+      this.silenceCount = 0;
+      this.emit("speech_start");
+    }
+  }
 
-        switch (this.state) {
-            case 'CALIBRATING':
-                this.calibrationEnergies.push(energy);
-                this.elapsedCalibrationTime += this.frameDurationMs;
-                if (this.elapsedCalibrationTime > this.calibrationDurationMs) {
-                    this.completeCalibration();
-                }
-                break;
-
-            case 'SILENCE':
-                if (this.smoothedEnergy > this.speechThreshold) {
-                    this.speechFrameCount++;
-                    if (this.speechFrameCount >= this.minSpeechFrames) {
-                        this.transitionTo('SPEAKING');
-                    }
-                } else {
-                    this.speechFrameCount = 0;
-                }
-                break;
-
-            case 'SPEAKING':
-                if (this.smoothedEnergy < this.silenceThreshold) {
-                    this.silenceFrameCount++;
-                    if (this.silenceFrameCount >= this.minSilenceFrames) {
-                        this.transitionTo('SILENCE');
-                    }
-                } else {
-                    this.silenceFrameCount = 0;
-                }
-                break;
-        }
-
-        return {
-            state: this.state,
-            energy: this.smoothedEnergy,
-            threshold: this.state === 'SPEAKING' ? this.silenceThreshold : this.speechThreshold
-        };
+  checkSpeaking(energy) {
+    if (energy < this.silenceThreshold) {
+        this.silenceCount++;
+    } else {
+        this.silenceCount = 0;
     }
 
-    calculateRms(samples) {
-        let sum = 0;
-        for (let i = 0; i < samples.length; i++) {
-            sum += samples[i] * samples[i];
-        }
-        return Math.sqrt(sum / samples.length) || 0;
+    // if silent for long enough, stop
+    if (this.silenceCount > this.hangoverFrames) {
+        this.state = "SILENCE";
+        this.speechCount = 0;
+        this.emit("speech_stop");
     }
-
-    completeCalibration() {
-        // Finalize background noise estimation and derive detection thresholds
-        const sum = this.calibrationEnergies.reduce((a, b) => a + b, 0);
-        this.noiseFloor = sum / this.calibrationEnergies.length;
-        // Prevent pathological cases where background noise is effectively zero
-        this.noiseFloor = Math.max(this.noiseFloor, 10);
-
-        this.speechThreshold = this.noiseFloor * this.speechMultiplier;
-        this.silenceThreshold = this.noiseFloor * this.silenceMultiplier;
-        
-        this.state = 'SILENCE';
-        console.log(`[VAD] Calibration complete. Noise Floor: ${this.noiseFloor.toFixed(2)}, Speech Thresh: ${this.speechThreshold.toFixed(2)}`);
-        this.emit('calibration_complete', {
-            noiseFloor: this.noiseFloor,
-            speechThreshold: this.speechThreshold,
-            silenceThreshold: this.silenceThreshold
-        });
-    }
-
-    transitionTo(newState) {
-        // Centralized state transition handler for SPEAKING ↔ SILENCE changes
-        console.log(`[VAD] State change: ${this.state} -> ${newState}`);
-        this.state = newState;
-        
-        if (newState === 'SPEAKING') {
-            this.emit('speech_start');
-            this.silenceFrameCount = 0;
-            this.speechFrameCount = 0;
-        } else if (newState === 'SILENCE') {
-            this.emit('speech_stop');
-            this.speechFrameCount = 0;
-            this.silenceFrameCount = 0;
-        }
-    }
-
+  }
 }
 
 module.exports = VAD;
