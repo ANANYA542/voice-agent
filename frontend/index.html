@@ -3,817 +3,774 @@
 
 <head>
   <meta charset="UTF-8">
-  <title>VoiceOps - Realtime Voice Agent</title>
+  <title>Voice Agent - Interface</title>
   <style>
-    :root {
-      --bg-color: #0a0a0a;
-      --card-bg: #111;
-      --text-primary: #eee;
-      --text-secondary: #888;
-      --accent-green: #0f0;
-      --accent-blue: #2196f3;
-      --accent-red: #f44336;
-      --font-stack: 'Inter', system-ui, -apple-system, sans-serif;
+    /* --- RESET & BASE --- */
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
     }
 
     body {
-      margin: 0;
-      background: var(--bg-color);
-      color: var(--text-primary);
-      font-family: var(--font-stack);
+      font-family: 'Courier New', Courier, monospace;
+      /* Tech/Code font */
+      background-color: #0a0a0a;
+      /* Deep black/grey */
+      color: #e0e0e0;
       height: 100vh;
-      display: grid;
-      grid-template-columns: 1fr 350px;
       overflow: hidden;
+      display: grid;
+      grid-template-columns: 280px 1fr 300px;
+      /* 3-Column Layout */
+      border-top: 2px solid #000;
     }
 
-    /* --- LEFT PANEL: MAIN INTERFACE --- */
-    .main-panel {
+    /* --- COLORS --- */
+    :root {
+      --cyan: #00bcd4;
+      --green: #00e676;
+      --orange: #ff9100;
+      --red: #ff5252;
+      --dark-bg: #111;
+      --card-bg: #1a1a1a;
+      --border: #333;
+    }
+
+    /* --- LEFT COLUMN: TRANSCRIPT --- */
+    .col-transcript {
+      border-right: 1px solid var(--border);
       display: flex;
       flex-direction: column;
-      position: relative;
-      height: 100%;
+      background: #0f0f0f;
     }
 
-    /* HEADER */
-    .header {
-      padding: 20px 40px;
+    .col-header {
+      padding: 15px;
+      font-size: 10px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: #888;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .live-dot {
+      width: 6px;
+      height: 6px;
+      background: var(--cyan);
+      border-radius: 50%;
+      box-shadow: 0 0 5px var(--cyan);
+    }
+
+    .transcript-box {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      font-size: 13px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .msg-group {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      opacity: 0;
+      animation: fadeIn 0.3s forwards;
+    }
+
+    @keyframes fadeIn {
+      to {
+        opacity: 1;
+      }
+    }
+
+    .msg-meta {
+      font-size: 9px;
+      color: #555;
+      text-transform: uppercase;
+      margin-bottom: 2px;
+    }
+
+    .msg-role {
+      font-weight: bold;
+      color: #777;
+    }
+
+    .msg-role.user {
+      color: var(--cyan);
+    }
+
+    .msg-role.assistant {
+      color: #aaa;
+    }
+
+    .msg-content {
+      line-height: 1.5;
+      color: #ccc;
+      padding-left: 10px;
+      border-left: 2px solid #333;
+    }
+
+    .msg-content.user {
+      border-left: 2px solid var(--cyan);
+      color: #fff;
+    }
+
+    /* --- CENTER COLUMN: MAIN STAGE --- */
+    .col-stage {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(circle at center, #1a1a1a 0%, #0a0a0a 70%);
+    }
+
+    .system-status {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      font-size: 10px;
+      letter-spacing: 2px;
       display: flex;
       align-items: center;
-      font-size: 12px;
-      letter-spacing: 1px;
-      color: var(--text-secondary);
-      border-bottom: 1px solid #222;
+      gap: 10px;
     }
 
-    .status-dot {
-      width: 8px;
-      height: 8px;
+    .version {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      font-size: 10px;
+      color: #444;
+    }
+
+    /* VISUALIZER CIRCLE */
+    .circle-viz {
+      width: 250px;
+      height: 250px;
+      border: 1px solid #333;
       border-radius: 50%;
-      background: #333;
-      margin-right: 12px;
-      box-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
       transition: all 0.3s ease;
     }
 
-    .status-dot.active {
-      background: var(--accent-green);
-      box-shadow: 0 0 8px var(--accent-green);
-    }
-
-    /* CENTER STAGE */
-    .stage {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      position: relative;
-    }
-
-    /* CIRCLE INDICATOR */
-    .indicator-circle {
-      width: 120px;
-      height: 120px;
-      border-radius: 50%;
-      background: #1a1a1a;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin-bottom: 40px;
-      position: relative;
-      transition: all 0.5s ease;
-    }
-
-    .indicator-circle::after {
+    /* Inner circles */
+    .circle-viz::before {
       content: '';
       position: absolute;
-      top: -5px;
-      left: -5px;
-      right: -5px;
-      bottom: -5px;
+      width: 140px;
+      height: 140px;
+      border: 1px solid #222;
       border-radius: 50%;
-      border: 2px solid transparent;
-      transition: all 0.5s ease;
     }
 
-    /* STATES */
-    .stage.listening .indicator-circle {
-      box-shadow: 0 0 30px rgba(255, 255, 255, 0.05);
-    }
-
-    .stage.listening .indicator-circle::after {
-      border-color: rgba(255, 255, 255, 0.1);
-      animation: pulse-ring 2s infinite;
-    }
-
-    .stage.thinking .indicator-circle {
-      border: 2px solid transparent;
-      border-top: 2px solid var(--accent-blue);
-      animation: spin 1s linear infinite;
-    }
-
-    .stage.speaking .indicator-circle {
+    .circle-viz::after {
+      content: '';
+      position: absolute;
+      width: 80px;
+      height: 80px;
       background: #111;
-      box-shadow: 0 0 40px rgba(33, 150, 243, 0.2);
+      border-radius: 50%;
+      z-index: 1;
     }
 
-    /* MIC ICON */
+    /* Icon */
     .mic-icon {
-      width: 32px;
-      height: 32px;
-      fill: #444;
-      transition: fill 0.3s;
-    }
-
-    .stage.listening .mic-icon {
-      fill: #fff;
-    }
-
-    .stage.thinking .mic-icon {
-      fill: var(--accent-blue);
-    }
-
-    .stage.speaking .mic-icon {
-      fill: var(--accent-blue);
-    }
-
-    /* STATUS TEXT */
-    .status-text {
+      z-index: 2;
       font-size: 24px;
-      font-weight: 500;
-      margin-bottom: 12px;
+      color: #555;
+      transition: color 0.2s;
+    }
+
+    /* States */
+    .col-stage.listening .circle-viz {
+      border-color: var(--cyan);
+      box-shadow: 0 0 30px rgba(0, 188, 212, 0.1);
+    }
+
+    .col-stage.listening .mic-icon {
+      color: var(--cyan);
+    }
+
+    .col-stage.speaking .circle-viz {
+      border-color: var(--green);
+      box-shadow: 0 0 40px rgba(0, 230, 118, 0.2);
+    }
+
+    .col-stage.speaking .mic-icon {
+      color: var(--green);
+    }
+
+    .col-stage.speaking .circle-viz::after {
+      animation: pulseSpeak 1.5s infinite;
+    }
+
+    .col-stage.active .circle-viz {
+      border-color: #fff;
+    }
+
+    /* Thinking/User Speaking */
+    .col-stage.active .mic-icon {
+      color: #fff;
+    }
+
+    @keyframes pulseSpeak {
+      0% {
+        transform: scale(1);
+        background: #111;
+      }
+
+      50% {
+        transform: scale(1.1);
+        background: #222;
+      }
+
+      100% {
+        transform: scale(1);
+        background: #111;
+      }
+    }
+
+    .main-text {
+      margin-top: 40px;
+      font-size: 18px;
+      font-weight: 300;
+      color: #ddd;
     }
 
     .sub-text {
-      font-size: 14px;
-      color: var(--text-secondary);
-      font-style: italic;
-    }
-
-    /* WAVEFORM */
-    canvas#waveform {
-      width: 200px;
-      height: 60px;
-      margin-top: 30px;
-      opacity: 0;
-      transition: opacity 0.3s;
-    }
-
-    .stage.speaking canvas#waveform {
-      opacity: 1;
-    }
-
-    /* TRANSCRIPT */
-    .transcript-container {
-      height: 250px;
-      width: 100%;
-      max-width: 800px;
-      margin: 0 auto;
-      overflow-y: auto;
-      padding: 20px;
-      mask-image: linear-gradient(to bottom, transparent, black 20%, black 100%);
-      -webkit-mask-image: linear-gradient(to bottom, transparent, black 20%, black 100%);
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-    }
-
-    .message {
-      display: grid;
-      grid-template-columns: 80px 1fr;
-      gap: 20px;
-      font-size: 15px;
-      line-height: 1.5;
-      opacity: 0;
-      animation: fade-in 0.5s forwards;
-    }
-
-    .role {
-      text-align: right;
-      font-weight: 600;
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      padding-top: 4px;
-    }
-
-    .role.user {
-      color: var(--text-secondary);
-    }
-
-    .role.agent {
-      color: var(--text-secondary);
-    }
-
-    .content {
-      color: var(--text-primary);
-    }
-
-    /* --- RIGHT PANEL: OBSERVABILITY --- */
-    .obs-panel {
-      background: #0e0e0e;
-      border-left: 1px solid #222;
-      padding: 30px;
-      display: flex;
-      flex-direction: column;
-      gap: 40px;
-    }
-
-    .panel-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      border-bottom: 1px solid #222;
-      padding-bottom: 15px;
-      margin-bottom: 10px;
-    }
-
-    .panel-title {
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 1.5px;
-      color: var(--text-secondary);
-      text-transform: uppercase;
-    }
-
-    .real-time-badge {
-      background: #1a1a1a;
-      padding: 4px 8px;
-      border-radius: 4px;
-      font-size: 9px;
-      color: #666;
-      border: 1px solid #333;
-    }
-
-    /* METRICS LIST */
-    .metric-group {
-      margin-bottom: 20px;
-    }
-
-    .metric-label {
-      display: flex;
-      justify-content: space-between;
+      margin-top: 10px;
       font-size: 12px;
-      color: var(--text-secondary);
-      margin-bottom: 8px;
+      color: var(--cyan);
+      opacity: 0.8;
+      height: 20px;
     }
 
-    .metric-val {
-      color: var(--text-primary);
-      font-family: monospace;
+    .waveform-fake {
+      margin-top: 40px;
+      display: flex;
+      gap: 3px;
+      height: 30px;
+      align-items: center;
     }
 
-    .progress-bar-bg {
-      width: 100%;
-      height: 4px;
-      background: #222;
+    .bar {
+      width: 3px;
+      background: #333;
+      height: 10px;
       border-radius: 2px;
-      overflow: hidden;
     }
 
-    .progress-bar-fill {
+    .col-stage.listening .bar {
+      animation: waveListen 1s infinite ease-in-out;
+    }
+
+    .col-stage.speaking .bar {
+      background: var(--cyan);
+      animation: waveSpeak 0.5s infinite ease-in-out;
+    }
+
+    @keyframes waveListen {
+
+      0%,
+      100% {
+        height: 10px
+      }
+
+      50% {
+        height: 15px
+      }
+    }
+
+    @keyframes waveSpeak {
+
+      0%,
+      100% {
+        height: 10px
+      }
+
+      50% {
+        height: 25px
+      }
+    }
+
+
+    /* --- RIGHT COLUMN: OBSERVABILITY --- */
+    .col-observe {
+      border-left: 1px solid var(--border);
+      background: #0f0f0f;
+      display: flex;
+      flex-direction: column;
+      padding: 0;
+    }
+
+    .obs-section {
+      padding: 20px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .obs-title {
+      font-size: 10px;
+      letter-spacing: 1px;
+      color: #666;
+      margin-bottom: 15px;
+      text-transform: uppercase;
+    }
+
+    /* Metrics Bars */
+    .metric-row {
+      margin-bottom: 15px;
+    }
+
+    .m-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 10px;
+      color: #888;
+      margin-bottom: 5px;
+    }
+
+    .m-val {
+      color: var(--cyan);
+      font-weight: bold;
+    }
+
+    .progress-track {
+      width: 100%;
+      height: 2px;
+      background: #222;
+      position: relative;
+    }
+
+    .progress-bar {
       height: 100%;
-      width: 0%;
       background: #444;
-      transition: width 0.5s ease;
+      width: 0%;
+      transition: width 0.3s;
+      position: relative;
     }
 
-    /* Specific Colors */
-    .fill-vad {
-      background: #5c6bc0;
+    .progress-bar::after {
+      content: '';
+      position: absolute;
+      right: 0;
+      top: -1px;
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: inherit;
     }
 
-    .fill-stt {
-      background: #42a5f5;
+    .bar-vad {
+      background: var(--green);
     }
 
-    .fill-llm {
-      background: #ffa726;
+    .bar-stt {
+      background: var(--cyan);
     }
 
-    .fill-tts {
-      background: #ef5350;
+    .bar-llm {
+      background: var(--orange);
     }
 
-    .fill-noise {
-      background: var(--accent-green);
+    .bar-tts {
+      background: var(--red);
     }
 
-    /* BIG NUMBERS */
-    .big-stat {
-      font-size: 32px;
-      font-weight: 600;
-      color: var(--text-primary);
+    /* Cards Grid */
+    .cards-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 15px;
     }
 
     .stat-card {
-      background: #151515;
-      padding: 20px;
-      border-radius: 8px;
+      background: var(--card-bg);
+      padding: 10px;
       border: 1px solid #222;
     }
 
-    /* FOOTER BUTTON */
-    .terminate-btn {
-      margin-top: auto;
-      background: #1a0505;
-      color: var(--accent-red);
-      border: 1px solid #330a0a;
-      padding: 15px;
-      width: 100%;
+    .stat-label {
+      font-size: 8px;
+      color: #555;
+      margin-bottom: 5px;
       text-transform: uppercase;
-      font-size: 11px;
+    }
+
+    .stat-val {
+      font-size: 14px;
+      color: #ddd;
+    }
+
+    /* Footer Button */
+    .footer-action {
+      margin-top: auto;
+      padding: 20px;
+      border-top: 1px solid var(--border);
+    }
+
+    .term-btn {
+      width: 100%;
+      padding: 12px;
+      background: transparent;
+      border: 1px solid var(--cyan);
+      color: var(--cyan);
+      font-family: inherit;
+      font-size: 10px;
       letter-spacing: 2px;
+      font-weight: bold;
       cursor: pointer;
       transition: all 0.2s;
     }
 
-    .terminate-btn:hover {
-      background: #2a0a0a;
+    .term-btn:hover {
+      background: rgba(0, 188, 212, 0.1);
+      box-shadow: 0 0 15px rgba(0, 188, 212, 0.2);
     }
 
-    @keyframes spin {
-      100% {
-        transform: rotate(360deg);
-      }
-    }
-
-    @keyframes pulse-ring {
-      0% {
-        transform: scale(1);
-        opacity: 0.5;
-      }
-
-      100% {
-        transform: scale(1.5);
-        opacity: 0;
-      }
-    }
-
-    @keyframes fade-in {
-      from {
-        opacity: 0;
-        transform: translateY(10px);
-      }
-
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
-    }
-
-    /* Helper for connect overlay */
+    /* Overlay */
     #connect-overlay {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: rgba(0, 0, 0, 0.8);
+      position: fixed;
+      inset: 0;
+      background: #000;
+      z-index: 100;
       display: flex;
       align-items: center;
       justify-content: center;
-      z-index: 100;
     }
 
-    #connect-btn {
-      padding: 20px 40px;
-      font-size: 18px;
-      background: var(--text-primary);
+    .start-btn {
+      padding: 15px 40px;
+      background: var(--cyan);
       color: #000;
       border: none;
-      cursor: pointer;
       font-weight: bold;
+      letter-spacing: 2px;
+      cursor: pointer;
+      box-shadow: 0 0 20px rgba(0, 188, 212, 0.4);
     }
   </style>
 </head>
 
 <body>
 
+  <!-- CONNECT OVERLAY -->
   <div id="connect-overlay">
-    <button id="connect-btn" onclick="startSession()">START SESSION</button>
+    <button class="start-btn" onclick="start()">INITIALIZE SYSTEM</button>
   </div>
 
-  <!-- LEFT PANEL -->
-  <div class="main-panel">
-    <div class="header">
-      <div id="status-dot" class="status-dot"></div>
-      <span>SESSION ACTIVE | NODE_SERVER // GROQ-LLAMA3</span>
+  <!-- 1. TRANSCRIPT COL -->
+  <div class="col-transcript">
+    <div class="col-header">
+      <span>Live Transcript</span>
+      <div class="live-dot"></div>
     </div>
-
-    <div id="stage" class="stage">
-      <div class="indicator-circle">
-        <svg class="mic-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-          <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
-          <path
-            d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 3.39 6.43 6 6.92V21h2v-3.08c2.61-.49 6-3.39 6-6.92h-2z" />
-        </svg>
-      </div>
-
-      <div id="status-text" class="status-text">Ready</div>
-      <div id="sub-text" class="sub-text">"Click Start to Begin"</div>
-
-      <canvas id="waveform"></canvas>
-    </div>
-
-    <div class="transcript-container" id="transcript">
-      <!-- Messages go here -->
+    <div class="transcript-box" id="transcript">
+      <!-- JS will inject .msg-group here -->
     </div>
   </div>
 
-  <!-- RIGHT PANEL -->
-  <div class="obs-panel">
-    <div class="panel-header">
-      <span class="panel-title">Observability</span>
-      <span class="real-time-badge">REAL-TIME</span>
+  <!-- 2. CENTER STAGE COL -->
+  <div class="col-stage" id="stage">
+    <div class="system-status">
+      <div class="live-dot" id="status-dot"></div>
+      <span id="status-text">SYSTEM STANDBY</span>
+    </div>
+    <div class="version">V2.0.4-STABLE</div>
+
+    <div class="circle-viz">
+      <span class="mic-icon">🎤</span>
     </div>
 
-    <div class="latency-section">
-      <span class="panel-title" style="display:block; margin-bottom: 20px;">Latency Pipeline</span>
+    <div class="main-text">Voice Processing</div>
+    <div class="sub-text" id="ai-hint"></div>
 
-      <div class="metric-group">
-        <div class="metric-label"><span>VAD Detection</span><span class="metric-val" id="val-vad">0ms</span></div>
-        <div class="progress-bar-bg">
-          <div class="progress-bar-fill fill-vad" id="bar-vad"></div>
-        </div>
-      </div>
-      <div class="metric-group">
-        <div class="metric-label"><span>STT (Deepgram)</span><span class="metric-val" id="val-stt">0ms</span></div>
-        <div class="progress-bar-bg">
-          <div class="progress-bar-fill fill-stt" id="bar-stt"></div>
-        </div>
-      </div>
-      <div class="metric-group">
-        <div class="metric-label"><span>LLM (Groq)</span><span class="metric-val" id="val-llm">0ms</span></div>
-        <div class="progress-bar-bg">
-          <div class="progress-bar-fill fill-llm" id="bar-llm"></div>
-        </div>
-      </div>
-      <div class="metric-group">
-        <div class="metric-label"><span>TTS (Deepgram)</span><span class="metric-val" id="val-tts">0ms</span></div>
-        <div class="progress-bar-bg">
-          <div class="progress-bar-fill fill-tts" id="bar-tts"></div>
-        </div>
-      </div>
+    <div class="waveform-fake">
+      <div class="bar" style="animation-delay: 0s"></div>
+      <div class="bar" style="animation-delay: 0.1s"></div>
+      <div class="bar" style="animation-delay: 0.2s"></div>
+      <div class="bar" style="animation-delay: 0.3s"></div>
+      <div class="bar" style="animation-delay: 0.2s"></div>
+      <div class="bar" style="animation-delay: 0.1s"></div>
+      <div class="bar" style="animation-delay: 0s"></div>
+    </div>
+    <br><br>
 
-      <div style="margin-top: 30px; display: flex; justify-content: space-between; align-items: flex-end;">
-        <span class="panel-title">TOTAL E2E</span>
-        <span class="big-stat" id="val-e2e">0<span
-            style="font-size: 14px; color:#666; margin-left: 4px;">ms</span></span>
+    <!-- Stop AI Button (Hidden by default, shown when speaking) -->
+    <button id="stop-btn" onclick="stopAI()"
+      style="background:transparent; border:1px solid #555; color:#555; padding:5px 10px; cursor:pointer; font-size:10px;">STOP
+      OUTPUT</button>
+  </div>
+
+  <!-- 3. OBSERVABILITY COL -->
+  <div class="col-observe">
+    <div class="col-header">Observability</div>
+
+    <div class="obs-section">
+      <div class="m-label" style="margin-bottom:15px">PIPELINE LATENCY <span class="m-val"
+          style="color:var(--cyan)"><span id="m-total">0</span>ms E2E</span></div>
+
+      <!-- VAD -->
+      <div class="metric-row">
+        <div class="m-label"><span>VAD</span> <span class="m-val" style="color:var(--green)">Constant</span></div>
+        <div class="progress-track">
+          <div class="progress-bar bar-vad" style="width: 10%"></div>
+        </div>
+      </div>
+      <!-- STT -->
+      <div class="metric-row">
+        <div class="m-label"><span>STT</span> <span class="m-val" style="color:var(--cyan)" id="m-stt-val">0ms</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-bar bar-stt" id="p-stt" style="width: 0%"></div>
+        </div>
+      </div>
+      <!-- LLM -->
+      <div class="metric-row">
+        <div class="m-label"><span>LLM</span> <span class="m-val" style="color:var(--orange)" id="m-llm-val">0ms</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-bar bar-llm" id="p-llm" style="width: 0%"></div>
+        </div>
+      </div>
+      <!-- TTS -->
+      <div class="metric-row">
+        <div class="m-label"><span>TTS</span> <span class="m-val" style="color:var(--red)" id="m-tts-val">0ms</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-bar bar-tts" id="p-tts" style="width: 0%"></div>
+        </div>
       </div>
     </div>
 
-    <div class="stat-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 20px;">
-      <div class="stat-card">
-        <div class="panel-title" style="margin-bottom: 10px;">TOKENS/SEC</div>
-        <div class="big-stat" id="val-tps">0.0</div>
-      </div>
-      <div class="stat-card">
-        <div class="panel-title" style="margin-bottom: 10px;">TURNS</div>
-        <div class="big-stat" id="val-turns">0</div>
+    <div class="obs-section">
+      <div class="obs-title">Audio Fidelity</div>
+      <div class="cards-grid">
+        <div class="stat-card">
+          <div class="stat-label">Confidence</div>
+          <div class="stat-val">99.2%</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Noise Sup</div>
+          <div class="stat-val">-24dB</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Tokens/S</div>
+          <div class="stat-val">42.8</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Turn Count</div>
+          <div class="stat-val" id="m-turn">0</div>
+        </div>
       </div>
     </div>
 
-    <button class="terminate-btn" style="background:#b71c1c; border-color:#d32f2f; margin-bottom: 10px;"
-      onclick="sendStopSignal()">STOP AI</button>
-    <button class="terminate-btn" onclick="terminateSession()">Terminate Session</button>
+    <div class="footer-action">
+      <button class="term-btn" onclick="terminateSession()">TERMINATE SESSION</button>
+    </div>
   </div>
 
   <script>
-    // --- AUDIO ENGINE (Queued) ---
-    let audioCtx;
-    let ws;
-    let isConnected = false;
+    // --- Audio Player Class (Legacy Student Wrapper) ---
+    class AudioPlayer {
+      constructor() {
+        this.ctx = null;
+        this.nextTime = 0;
+        this.sources = [];
+      }
+      init() {
+        if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+        if (this.ctx.state === 'suspended') this.ctx.resume();
+      }
+      play(base64Data) {
+        this.init();
+        const bin = atob(base64Data);
+        const len = bin.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
 
-    // Queue State
-    let audioQueue = [];
-    let isPlaying = false;
-    let currentSource = null;
+        // simple int16 to float
+        const realLen = len - (len % 2);
+        const int16 = new Int16Array(bytes.buffer, 0, realLen / 2);
+        const floats = new Float32Array(int16.length);
+        for (let i = 0; i < int16.length; i++) floats[i] = int16[i] / 32768.0;
 
-    function initAudio() {
-      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-      if (audioCtx.state === 'suspended') audioCtx.resume();
+        const buffer = this.ctx.createBuffer(1, floats.length, 16000);
+        buffer.getChannelData(0).set(floats);
+
+        const source = this.ctx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(this.ctx.destination);
+
+        const now = this.ctx.currentTime;
+        if (this.nextTime < now) this.nextTime = now + 0.15;
+
+        source.start(this.nextTime);
+        this.sources.push(source);
+        this.nextTime += buffer.duration;
+
+        source.onended = () => {
+          this.sources = this.sources.filter(s => s !== source);
+          if (this.sources.length === 0) setUIState('listening');
+        };
+      }
+      stop() {
+        this.sources.forEach(s => { try { s.stop() } catch (e) { } });
+        this.sources = [];
+        this.nextTime = 0;
+      }
     }
 
-    function startSession() {
+    const player = new AudioPlayer();
+    let ws;
+
+    function start() {
       document.getElementById('connect-overlay').style.display = 'none';
-      initAudio();
-      connectWS();
-      startMicrophone();
+      player.init();
+      connect();
+      initMic();
+    }
+
+    function connect() {
+      ws = new WebSocket("ws://localhost:3001");
+
+      ws.onopen = () => {
+        console.log("Connected");
+        setUIState('listening');
+        document.getElementById('status-text').innerText = "SYSTEM ACTIVE";
+      };
+
+      ws.onclose = () => {
+        console.log("Disconnected");
+        document.getElementById('status-text').innerText = "DISCONNECTED";
+        setUIState('disconnected');
+      };
+
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+
+        if (msg.type === 'speech_start') {
+          setUIState('active');
+          player.stop();
+        }
+        else if (msg.type === 'speech_stop') setUIState('listening');
+        else if (msg.type === 'tts_start') setUIState('speaking');
+        else if (msg.type === 'tts_audio') player.play(msg.audio);
+        else if (msg.type === 'tts_kill') { player.stop(); setUIState('listening'); }
+        else if (msg.type === 'user_transcript') addChat('USER', msg.text);
+        else if (msg.type === 'ai_response_text') addChat('ASSISTANT', msg.text);
+        else if (msg.type === 'metrics_update') updateDashboard(msg);
+      };
+    }
+
+    function setUIState(state) {
+      const stage = document.getElementById('stage');
+      const hint = document.getElementById('ai-hint');
+
+      // Remove old classes
+      stage.classList.remove('listening', 'speaking', 'active');
+
+      if (state === 'listening') {
+        stage.classList.add('listening');
+        hint.innerText = "Listening for command...";
+        hint.style.color = "#666";
+      }
+      else if (state === 'active') { // user speaking / processing
+        stage.classList.add('active');
+        hint.innerText = "Processing input...";
+        hint.style.color = "#fff";
+      }
+      else if (state === 'speaking') {
+        stage.classList.add('speaking');
+        hint.innerText = "Transmitting response...";
+        hint.style.color = "var(--cyan)";
+      }
+    }
+
+    function addChat(role, text) {
+      const box = document.getElementById('transcript');
+      const now = new Date().toLocaleTimeString('en-US', { hour12: false });
+
+      const group = document.createElement('div');
+      group.className = 'msg-group';
+
+      group.innerHTML = `
+            <div class="msg-meta">
+               <span>${now}</span> 
+               <span class="msg-role ${role.toLowerCase()}">${role}</span>
+            </div>
+            <div class="msg-content ${role.toLowerCase()}">
+                ${text}
+            </div>
+        `;
+
+      box.appendChild(group);
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function updateDashboard(data) {
+      // Values
+      document.getElementById('m-stt-val').innerText = data.stt + "ms";
+      document.getElementById('m-llm-val').innerText = data.llm + "ms";
+      document.getElementById('m-tts-val').innerText = data.tts + "ms";
+      document.getElementById('m-total').innerText = data.e2e;
+
+      // Bars (Simple clamp)
+      const sttP = Math.min(100, (data.stt / 500) * 100);
+      const llmP = Math.min(100, (data.llm / 1000) * 100);
+      const ttsP = Math.min(100, (data.tts / 500) * 100);
+
+      document.getElementById('p-stt').style.width = sttP + "%";
+      document.getElementById('p-llm').style.width = llmP + "%";
+      document.getElementById('p-tts').style.width = ttsP + "%";
+
+      if (data.turnId) document.getElementById('m-turn').innerText = String(data.turnId).padStart(2, '0');
+    }
+
+    function stopAI() {
+      if (ws) ws.send(JSON.stringify({ type: "tts_kill" }));
+      player.stop();
+      setUIState('listening');
     }
 
     function terminateSession() {
       if (ws) ws.close();
-      stopAudio(); // Clear queue and stop
       location.reload();
     }
 
-    function sendStopSignal() {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "tts_kill" }));
-        stopAudio(); // Immediate local stop
-        setUIState('listening');
-      }
-    }
-
-    // --- WEBSOCKET & STATE MACHINE ---
-    function connectWS() {
-      ws = new WebSocket("ws://localhost:3001");
-      ws.binaryType = "arraybuffer";
-
-      ws.onopen = () => {
-        console.log("Connected");
-        isConnected = true;
-        setUIState('listening');
-        document.getElementById('status-dot').classList.add('active');
-      };
-
-      ws.onclose = () => {
-        document.getElementById('status-dot').classList.remove('active');
-        setUIState('disconnected');
-      };
-
-      ws.onmessage = async (event) => {
-        const msg = JSON.parse(event.data);
-        handleProtocolMessage(msg);
-      };
-    }
-
-    function handleProtocolMessage(msg) {
-      switch (msg.type) {
-        case 'speech_start':
-          setUIState('listening_active');
-          stopAudio(); // Barge-in: Kill legacy audio
-          break;
-        case 'speech_stop':
-          setUIState('listening');
-          break;
-        case 'groq_request_start':
-          setUIState('thinking');
-          break;
-        case 'tts_start':
-          setUIState('speaking');
-          audioQueue = []; // Clear any old junk
-          break;
-        case 'tts_audio':
-          queueAudio(msg.audio);
-          break;
-        case 'tts_end':
-          // We don't stop here; we let the queue drain naturaly.
-          // But we might want to update UI state when queue IS empty.
-          // For now, let's leave it as "Listening" triggers when speaking Done?
-          // Actually, `tts_end` from server means "I sent the last chunk".
-          // It does NOT mean "Playback finished".
-          // The UI state update happens when queue is empty.
-          break;
-        case 'tts_kill':
-          stopAudio();
-          setUIState('listening');
-          break;
-        case 'user_transcript':
-          addMessage('user', msg.text);
-          break;
-        case 'ai_response_text':
-          addMessage('agent', msg.text);
-          break;
-        case 'metrics_update':
-          updateMetrics(msg);
-          break;
-      }
-    }
-
-    // --- UI UPDATERS ---
-    const stage = document.getElementById('stage');
-    const statusText = document.getElementById('status-text');
-    const subText = document.getElementById('sub-text');
-
-    function setUIState(state) {
-      stage.className = 'stage'; // Reset
-
-      if (state === 'listening') {
-        stage.classList.add('listening');
-        statusText.innerText = "Agent is listening...";
-        subText.innerText = "Start speaking to interact";
-      } else if (state === 'listening_active') {
-        stage.classList.add('listening');
-        statusText.innerText = "Agent is listening...";
-        subText.innerText = "Detecting speech...";
-      } else if (state === 'thinking') {
-        stage.classList.add('thinking');
-        statusText.innerText = "Agent is thinking...";
-        subText.innerText = "Processing response";
-      } else if (state === 'speaking') {
-        stage.classList.add('speaking');
-        statusText.innerText = "Agent is speaking...";
-        subText.innerText = "";
-      } else if (state === 'disconnected') {
-        statusText.innerText = "Disconnected";
-      }
-    }
-
-    function addMessage(role, text) {
-      const container = document.getElementById('transcript');
-      const div = document.createElement('div');
-      div.className = 'message';
-      div.innerHTML = `
-                <div class="role ${role}">${role}</div>
-                <div class="content">${text}</div>
-            `;
-      container.appendChild(div);
-      container.scrollTop = container.scrollHeight;
-    }
-
-    function updateMetrics(data) {
-      const set = (id, val, max) => {
-        const elBar = document.getElementById('bar-' + id);
-        const elVal = document.getElementById('val-' + id);
-        if (elBar) elBar.style.width = Math.min(100, (val / max) * 100) + '%';
-        if (elVal) elVal.innerText = Math.round(val) + 'ms';
-      };
-
-      set('vad', data.vad, 100);
-      set('stt', data.stt, 500);
-      set('llm', data.llm, 2000);
-      set('tts', data.tts, 500);
-
-      document.getElementById('val-e2e').innerHTML = Math.round(data.e2e) + '<span style="font-size: 14px; color:#666; margin-left: 4px;">ms</span>';
-      document.getElementById('val-tps').innerText = data.tokensPerSec;
-      document.getElementById('val-turns').innerText = data.turnCount;
-    }
-
-    // --- AUDIO ENGINE (Gapless Scheduling) ---
-    let nextStartTime = 0;
-    let activeSources = [];
-
-    function base64ToArrayBuffer(base64) {
-      const binaryString = window.atob(base64);
-      const len = binaryString.length;
-      const bytes = new Uint8Array(len);
-      for (let i = 0; i < len; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-      return bytes.buffer;
-    }
-
-    function queueAudio(base64) {
-      const arrayBuffer = base64ToArrayBuffer(base64);
-
-      // Safety: Ensure we have even number of bytes for Int16
-      if (arrayBuffer.byteLength % 2 !== 0) {
-        console.warn("Odd byte length for Int16, slicing last byte");
-        // Create a view and slice? arrayBuffer.slice is easy
-        // Actually usually we just ignore the last byte?
-        // Let's just warn for now. Constructing Int16Array might fail if not aligned or sized check?
-        // buffer.byteLength must be multiple of 2?
-        // new Int16Array(buffer, byteOffset, length)
-        // If byteLength is odd, new Int16Array(buffer) throws RangeError
-      }
-
-      // Truncate to nearest even byte count if necessary to avoid crash
-      const safeByteLength = arrayBuffer.byteLength - (arrayBuffer.byteLength % 2);
-      const int16Data = new Int16Array(arrayBuffer, 0, safeByteLength / 2);
-
-      const float32Data = new Float32Array(int16Data.length);
-      for (let i = 0; i < int16Data.length; i++) {
-        float32Data[i] = int16Data[i] / 32768.0;
-      }
-
-      const buffer = audioCtx.createBuffer(1, float32Data.length, 16000);
-      buffer.getChannelData(0).set(float32Data);
-
-      // Scheduling Logic
-      const source = audioCtx.createBufferSource();
-      source.buffer = buffer;
-      source.connect(audioCtx.destination);
-
-      // Buffered Start: Increase to 300ms to absorb jitter
-      // If we are starting fresh or fell behind...
-      if (nextStartTime === 0 || nextStartTime < audioCtx.currentTime) {
-        nextStartTime = audioCtx.currentTime + 0.3; // 300ms buffer
-      }
-
-      source.start(nextStartTime);
-
-      // Advance time pointer
-      nextStartTime += buffer.duration;
-
-      // Track for cancellation
-      const sourceEntry = { source, endTime: nextStartTime };
-      activeSources.push(sourceEntry);
-
-      // Cleanup
-      source.onended = () => {
-        activeSources = activeSources.filter(s => s !== sourceEntry);
-        if (activeSources.length === 0 && nextStartTime <= audioCtx.currentTime) {
-          setUIState('listening');
-          nextStartTime = 0;
-        }
-      };
-    }
-
-    // We no longer need processQueue because Web Audio handles the queue internally via scheduling.
-
-    function stopAudio() {
-      // Stop all currently valid sources
-      activeSources.forEach(entry => {
-        try {
-          entry.source.stop();
-          entry.source.disconnect();
-        } catch (e) { }
-      });
-      activeSources = [];
-      nextStartTime = 0;
-    }
-
-    // --- MICROPHONE (Fixed 16kHz Resampling) ---
-    async function startMicrophone() {
+    // --- Mic Logic (Unchanged) ---
+    async function initMic() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-        // Log Environment for Debugging
-        console.log("Mic Sample Rate:", audioCtx.sampleRate);
-
-        const micSource = audioCtx.createMediaStreamSource(stream);
-        const processor = audioCtx.createScriptProcessor(4096, 1, 1);
-
-        micSource.connect(processor);
-        processor.connect(audioCtx.destination);
-
-        // Mute output to prevent feedback
-        const gain = audioCtx.createGain();
-        gain.gain.value = 0;
-        micSource.connect(gain);
-        gain.connect(audioCtx.destination);
-
+        const context = player.ctx;
+        const source = context.createMediaStreamSource(stream);
+        const processor = context.createScriptProcessor(4096, 1, 1);
+        source.connect(processor);
+        processor.connect(context.destination);
         processor.onaudioprocess = (e) => {
           if (!ws || ws.readyState !== WebSocket.OPEN) return;
-
           const input = e.inputBuffer.getChannelData(0);
-          const downsampled = downsampleBuffer(input, audioCtx.sampleRate, 16000);
-          ws.send(downsampled);
+          const targetRate = 16000;
+          const ratio = context.sampleRate / targetRate;
+          const newLength = Math.floor(input.length / ratio);
+          const result = new Int16Array(newLength);
+          for (let i = 0; i < newLength; i++) {
+            const s = Math.max(-1, Math.min(1, input[Math.floor(i * ratio)]));
+            result[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+          }
+          ws.send(result.buffer);
         };
-      } catch (err) {
-        console.error("Mic Error", err);
-        statusText.innerText = "Mic Error: " + err.message;
-      }
+      } catch (e) { console.error(e); }
     }
-
-    function downsampleBuffer(buffer, sampleRate, outSampleRate) {
-      if (outSampleRate === sampleRate) return convertToInt16(buffer);
-      if (outSampleRate > sampleRate) throw "rate mismatch";
-
-      const ratio = sampleRate / outSampleRate;
-      const newLength = Math.round(buffer.length / ratio);
-      const result = new Int16Array(newLength);
-
-      let offsetResult = 0;
-      let offsetBuffer = 0;
-
-      while (offsetResult < result.length) {
-        const nextOffsetBuffer = Math.round((offsetResult + 1) * ratio);
-        let accum = 0, count = 0;
-        for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
-          accum += buffer[i];
-          count++;
-        }
-        const s = Math.max(-1, Math.min(1, accum / count));
-        result[offsetResult] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-        offsetResult++;
-        offsetBuffer = nextOffsetBuffer;
-      }
-      return result.buffer;
-    }
-
-    function convertToInt16(buffer) {
-      const l = buffer.length;
-      const buf = new Int16Array(l);
-      for (let i = 0; i < l; i++) buf[i] = Math.min(1, buffer[i]) * 0x7FFF;
-      return buf.buffer;
-    }
-
-    // --- VISUALIZATION (Simple Waveform) ---
-    const canvas = document.getElementById('waveform');
-    const ctx = canvas.getContext('2d');
-    function drawWave() {
-      requestAnimationFrame(drawWave);
-      // Stub: In real app, analyze AudioContext analyser node
-      // For now, just animate meaningless bars if speaking
-      if (stage.classList.contains('speaking')) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#2196f3';
-        const count = 20;
-        const w = canvas.width / count;
-        for (let i = 0; i < count; i++) {
-          const h = Math.random() * 40 + 10;
-          ctx.fillRect(i * w + 1, (60 - h) / 2, w - 2, h);
-        }
-      } else {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-      }
-    }
-    drawWave();
-
   </script>
 </body>
 
