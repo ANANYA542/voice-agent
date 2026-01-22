@@ -1,10 +1,275 @@
 <!DOCTYPE html>
 <html>
+
 <head>
   <title>Voice Agent</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      padding: 20px;
+    }
+
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+
+    #status {
+      margin-top: 10px;
+      color: #666;
+    }
+  </style>
 </head>
+
 <body>
-  <button onclick="startAudio()">Start Audio</button>
-  <script src="main.js"></script>
+  <h2>Voice Agent Audio Console</h2>
+  <button onclick="connect()">Connect & Start Audio</button>
+  <div id="status">Disconnected</div>
+
+  <script>
+    let ws;
+    let audioCtx;
+    let currentSource = null;
+    let isConnected = false;
+
+    // Initialize AudioContext on user interaction (browser policy)
+    function initAudio() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+    }
+
+    function connect() {
+      if (isConnected) return;
+      initAudio();
+
+      ws = new WebSocket("ws://localhost:3001");
+      ws.binaryType = "arraybuffer"; // Important for receiving audio? No, receiving is JSON base64. Sending is binary.
+
+      ws.onopen = async () => {
+        console.log("WebSocket connected");
+        document.getElementById("status").innerText = "Connected - Speaking & Listening...";
+        isConnected = true;
+
+        try {
+          await startMicrophone();
+        } catch (e) {
+          console.error("Mic Error:", e);
+          document.getElementById("status").innerText = "Error accessing microphone";
+        }
+      };
+
+      ws.onclose = () => {
+        console.log("WebSocket disconnected");
+        document.getElementById("status").innerText = "Disconnected";
+        isConnected = false;
+        stopMicrophone();
+      };
+
+      ws.onmessage = async (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+
+          if (msg.type === "tts_audio") {
+            await playAudio(msg.audio);
+          }
+
+          if (msg.type === "tts_kill") {
+            console.log("Received tts_kill");
+            stopAudio();
+          }
+        } catch (e) {
+          console.error("Error processing message:", e);
+        }
+      };
+    }
+
+    // --- Microphone & Audio Processing ---
+    let mediaStream;
+    let micSource;
+    let processor;
+
+    async function startMicrophone() {
+      mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      micSource = audioCtx.createMediaStreamSource(mediaStream);
+
+      // Create a ScriptProcessorNode to handle raw audio data
+      // Buffer size 4096 is a good balance for latency/performance in JS
+      processor = audioCtx.createScriptProcessor(4096, 1, 1);
+
+      micSource.connect(processor);
+      processor.connect(audioCtx.destination); // destination is needed for script processor to run, but we mute it? No, usually muted by not connecting/handling output. 
+      // Wait, connecting mic to destination causes feedback loop!
+      // We typically connect processor to destination but silence the output in process?
+      // Or connect to a GainNode with gain 0.
+
+      const zeroGain = audioCtx.createGain();
+      zeroGain.gain.value = 0;
+      processor.connect(zeroGain);
+      zeroGain.connect(audioCtx.destination);
+
+      processor.onaudioprocess = (e) => {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+        const inputData = e.inputBuffer.getChannelData(0); // Float32Array at context sample rate (e.g. 44.1k or 48k)
+        const targetSampleRate = 16000;
+        const downsampledBuffer = downsampleBuffer(inputData, audioCtx.sampleRate, targetSampleRate);
+
+        // Send Int16 PCM
+        ws.send(downsampledBuffer);
+      };
+    }
+
+    function stopMicrophone() {
+      if (mediaStream) mediaStream.getTracks().forEach(track => track.stop());
+      if (micSource) micSource.disconnect();
+      if (processor) {
+        processor.disconnect();
+        processor.onaudioprocess = null;
+      }
+    }
+
+    // Simple Downsampler (Linear Interpolation / Decimation)
+    function downsampleBuffer(buffer, sampleRate, outSampleRate) {
+      if (outSampleRate === sampleRate) {
+        return convertFloat32ToInt16(buffer);
+      }
+      if (outSampleRate > sampleRate) {
+        throw "downsampling rate show be smaller than original sample rate";
+      }
+      const sampleRateRatio = sampleRate / outSampleRate;
+      const newLength = Math.round(buffer.length / sampleRateRatio);
+      const result = new Int16Array(newLength);
+
+      let offsetResult = 0;
+      let offsetBuffer = 0;
+
+      while (offsetResult < result.length) {
+        const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
+        // Use average value of accumulated samples (simple averaging for anti-aliasing approximation)
+        let accum = 0, count = 0;
+        for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
+          accum += buffer[i];
+          count++;
+        }
+
+        // Clamp and Convert
+        // Float is -1.0 to 1.0. Int16 is -32768 to 32767.
+        const s = Math.max(-1, Math.min(1, accum / count));
+        result[offsetResult] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+
+        offsetResult++;
+        offsetBuffer = nextOffsetBuffer;
+      }
+      return result.buffer;
+    }
+
+    function convertFloat32ToInt16(buffer) {
+      let l = buffer.length;
+      let buf = new Int16Array(l);
+      while (l--) {
+        buf[l] = Math.min(1, buffer[l]) * 0x7FFF;
+      }
+      return buf.buffer;
+    }
+
+    async function playAudio(base64) {
+      // Note: In a real streaming setup with multiple chunks, 
+      // we usually append to a buffer or use a queue.
+      // Since our server sends small chunks, decoding strictly one by one 
+      // might sound glitchy if chunks are tiny. 
+      // However, for this implementation phase, we decode and play immediately.
+      // If `stopAudio()` is called here, it cuts off the *previous* chunk.
+      // For continuous streaming, we ideally shouldn't cut off previous chunks 
+      // of the SAME stream, but "tts_kill" handles barge-in.
+      // Let's assume chunks arrive and are played sequentially. 
+      // The `start(0)` causes overlap if we don't manage time.
+      // FIX: We need a scheduler. 
+      // But user prompt said: "Use AudioContext.decodeAudioData()... Call start(0)."
+      // AND "Never overlap audio playback."
+      // IF we receive a stream of chunks for ONE sentence, we want to queue them.
+      // IF we receive a NEW sentence, we want to stop previous.
+
+      // But the message contract doesn't distinguish "New Stream" vs "Chunk of same stream".
+      // `tts_kill` implies "Stop EVERYTHING".
+      // So overlapping chunks is actually correct for "Assemblage"? 
+      // No, overlapping chunks sounds like chaos.
+      // For this specific transport (Base64 Chunks), the best approach without a complete SourceBuffer/MSE 
+      // is to schedule them.
+      // However, the User Prompt Reference Implementation just calls `stopAudio()` then plays.
+      // That implies the Reference Implementation expects ONE big buffer (Layer 1).
+      // But we moved to Layer 2 (Streaming).
+      // If I use the reference implementation logic on a stream, it will choke (play 20ms, cut, play next 20ms).
+      //
+      // REVISION: The User Prompt Reference Implementation was for Layer 1 (Full Buffer).
+      // But I am on Layer 2 (Streaming).
+      // 
+      // To have working audio for streaming chunks without complex scheduling:
+      // I will implement a simple queue.
+
+      const audioData = base64ToArrayBuffer(base64);
+      const audioBuffer = await audioCtx.decodeAudioData(audioData);
+
+      const source = audioCtx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(audioCtx.destination);
+
+      // Naive scheduling: play after current time or now
+      // Since we want low latency, we play NOW.
+      // But sequential chunks need to be scheduled.
+      // Let's stick to the User's Reference Logic for "Simple Playback" first?
+      // No, that will break streaming.
+      // All right, I will implement a minimal "append" logic by tracking `nextStartTime`.
+
+      if (!startTime) {
+        startTime = audioCtx.currentTime;
+      }
+
+      // Schedule this chunk to play at the end of the previous one
+      // If latency caused a gap, play immediately (don't delay for past time).
+      const playTime = Math.max(audioCtx.currentTime, startTime);
+      source.start(playTime);
+      startTime = playTime + audioBuffer.duration;
+
+      // Keep track of the *last* source to stop on barge-in
+      // (Barge-in kills everything, so maybe just track the latest?)
+      // We'll push to a list.
+      activeSources.push(source);
+
+      source.onended = () => {
+        activeSources = activeSources.filter(s => s !== source);
+      };
+    }
+
+    // Globals for simple scheduling
+    let startTime = 0;
+    let activeSources = [];
+
+    function base64ToArrayBuffer(base64) {
+      const binaryString = window.atob(base64);
+      const len = binaryString.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      return bytes.buffer;
+    }
+
+    function stopAudio() {
+      // Barge-in: Stop ALL currently playing sources
+      activeSources.forEach(source => {
+        try { source.stop(); } catch (e) { }
+        try { source.disconnect(); } catch (e) { }
+      });
+      activeSources = [];
+      startTime = 0; // Reset scheduler
+      console.log("Audio stopped (Barge-in)");
+    }
+  </script>
 </body>
+
 </html>

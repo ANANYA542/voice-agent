@@ -17,8 +17,8 @@ async function textToSpeech(text) {
   if (timer.length === 0) {
     throw new Error("TTS Error: Input text cannot be empty.");
   }
-  if (timer.length > 2000) {
-    throw new Error("TTS Error: Input text exceeds 2000 characters.");
+  if (timer.length > 5000) {
+    throw new Error("TTS Error: Input text exceeds 5000 characters.");
   }
 
   try {
@@ -60,6 +60,37 @@ async function textToSpeech(text) {
   }
 }
 
+/**
+ * Streaming function to synthesize speech.
+ * @param {string} text 
+ * @returns {Promise<ReadableStreamDefaultReader<Uint8Array>>}
+ */
+async function streamTextToSpeech(text) {
+  if (typeof text !== "string" || text.trim().length === 0 || text.length > 5000) {
+    throw new Error("TTS Error: Invalid input text.");
+  }
+
+  try {
+    const response = await deepgram.speak.request(
+      { text: text.trim() },
+      {
+        model: "aura-asteria-en",
+        encoding: "linear16",
+        sample_rate: 16000,
+        container: "none", // get raw samples if possible, or wav without header loop? 
+                        // Actually 'none' container is best for streaming raw PCM to AppendBuffer on frontend.
+                        // But frontend expects linear16. Wave header might be annoying in chunks.
+                        // Let's stick to strict linear16 RAW (container: none).
+      }
+    );
+    const stream = await response.getStream();
+    if (!stream) throw new Error("TTS Error: No stream.");
+    return stream.getReader();
+  } catch (error) {
+    throw new Error(`TTS Stream Failed: ${error.message}`);
+  }
+}
+
 // Helper to convert readable stream to buffer
 async function getBufferFromStream(stream) {
     const chunks = [];
@@ -74,4 +105,4 @@ async function getBufferFromStream(stream) {
     return Buffer.concat(chunks);
 }
 
-module.exports = { textToSpeech };
+module.exports = { textToSpeech, streamTextToSpeech };

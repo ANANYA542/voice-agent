@@ -3,7 +3,7 @@ const WebSocket = require("ws");
 const { createDeepgramStream } = require("./stt/deepgram");
 const { callGroq } = require("./llm/groq");
 const VAD = require("./vad");
-const { textToSpeech } = require("./tts/deepgram");
+const { textToSpeech, streamTextToSpeech } = require("./tts/deepgram");
 
 const PORT = 3001;
 const FRAME_SIZE_BYTES = 640; // 20ms @ 16kHz, mono, 16-bit PCM
@@ -31,17 +31,33 @@ function validateConversation(conversation) {
   );
 }
 
-async function finalizeTurn(session, ws) {
+async function finalizeTurn(session, ws, turnId) {
+  // 1. Turn Ownership Check (Pre-Validation)
+  if (turnId !== session.turn.id) {
+      log("turn_aborted_pre_stt", { sessionId: session.id, turnId });
+      return;
+  }
+
   const userText = session.finalTranscript.trim();
   session.finalTranscript = "";
 
+  // 2. Transcript Validation
   if (!userText) {
     log("empty_transcript", { sessionId: session.id });
+    session.turn.active = false;
     return;
   }
 
+  // "Reject transcript if: length < 10 OR word count < 2"
+  const wordCount = userText.split(/\s+/).length;
+  if (userText.length < 10 || wordCount < 2) {
+      log("invalid_transcript", { sessionId: session.id, text: userText, reason: "too_short" });
+      session.turn.active = false;
+      return;
+  }
+
   const sttLatency = Date.now() - session.metrics.sttStart;
-  log("user_transcript", { sessionId: session.id, text: userText, sttLatency });
+  log("user_transcript", { sessionId: session.id, text: userText, sttLatency, turnId });
 
   session.conversation.push({ role: "user", content: userText });
 
@@ -51,7 +67,7 @@ async function finalizeTurn(session, ws) {
   }));
 
   session.metrics.llmStart = Date.now();
-  log("groq_request_start", { sessionId: session.id });
+  log("groq_request_start", { sessionId: session.id, turnId });
 
   try {
     const safeHistory = validateConversation(session.conversation);
@@ -67,6 +83,12 @@ async function finalizeTurn(session, ws) {
 
     const response = await callGroq(messages);
 
+    // 3. Turn Ownership Check (Post-LLM)
+    if (turnId !== session.turn.id) {
+        log("turn_aborted_post_llm", { sessionId: session.id, turnId });
+        return;
+    }
+
     const llmLatency = Date.now() - session.metrics.llmStart;
 
     log("groq_response", {
@@ -80,35 +102,50 @@ async function finalizeTurn(session, ws) {
       content: response.text,
     });
 
-    session.isSpeaking = true;
-
     // Send AI response to frontend
     ws.send(JSON.stringify({
       type: "ai_response_text",
       text: response.text,
     }));
 
-    // TTS PIPELINE START
+    // TTS PIPELINE START (Streamed)
     log("tts_start", { sessionId: session.id, textLength: response.text.length });
     const ttsStartTime = Date.now();
+    let firstByteSent = false;
 
     try {
-        const audioBuffer = await textToSpeech(response.text);
-        const ttsLatency = Date.now() - ttsStartTime;
+        const reader = await streamTextToSpeech(response.text);
+        
+        while (true) {
+            // 4. Turn Ownership & Barge-In Check (Loop)
+            if (turnId !== session.turn.id) {
+                log("tts_aborted_loop", { sessionId: session.id, turnId });
+                await reader.cancel();
+                break;
+            }
 
-        log("tts_complete", { 
-            sessionId: session.id, 
-            latency: ttsLatency, 
-            audioSize: audioBuffer.length 
-        });
+            const { done, value } = await reader.read();
+            if (done) break;
 
-        // Deterministic Send
-        ws.send(JSON.stringify({
-            type: "tts_audio",
-            audio: audioBuffer.toString("base64"),
-            format: "linear16",
-            sampleRate: 16000
-        }));
+            if (value) {
+                if (!firstByteSent) {
+                    firstByteSent = true;
+                    log("tts_time_to_first_byte", { 
+                        sessionId: session.id, 
+                        latency: Date.now() - ttsStartTime 
+                    });
+                }
+                
+                ws.send(JSON.stringify({
+                    type: "tts_audio",
+                    audio: Buffer.from(value).toString("base64"),
+                    format: "linear16",
+                    sampleRate: 16000
+                }));
+            }
+        }
+        
+        log("tts_complete", { sessionId: session.id, latency: Date.now() - ttsStartTime });
 
     } catch (ttsError) {
         log("tts_error", { 
@@ -118,6 +155,7 @@ async function finalizeTurn(session, ws) {
         });
     }
     // TTS PIPELINE END
+    session.turn.active = false; // Turn Complete
 
     const e2eLatency = Date.now() - session.metrics.sttStart;
     log("turn_complete", {
@@ -129,6 +167,7 @@ async function finalizeTurn(session, ws) {
     
   } catch (err) {
     log("groq_error", { sessionId: session.id, error: err.message });
+    session.turn.active = false;
   }
 }
 
@@ -143,8 +182,12 @@ wss.on("connection", (ws) => {
     finalTranscript: "",
     audioBuffer: Buffer.alloc(0),
     audioBacklog: [], 
-    isProcessing: false, // Global Lock for the Transaction
-    isSpeaking: false,   // TTS Lock
+    isProcessing: false, // STT Lock (Deepgram connection active)
+    turn: {
+        id: 0,
+        active: false,
+        abortController: null
+    },
     context: "You are a helpful, concise voice assistant.",
     metrics: {
       sttStart: 0,
@@ -175,14 +218,28 @@ wss.on("connection", (ws) => {
   });
 
   vad.on("speech_start", () => {
-    // 1. Transaction Lock Check
-    if (session.isProcessing || session.isSpeaking) {
-      log("speech_start_ignored", { sessionId, reason: session.isSpeaking ? "tts_active" : "processing_active" });
-      return;
+    // 1. True Barge-In: Abort ANY active turn immediately
+    if (session.turn.active) {
+        log("barge_in_aborting_turn", { sessionId, turnId: session.turn.id });
+        session.turn.abortController?.abort();
+        session.turn.active = false;
+        ws.send(JSON.stringify({ type: "tts_kill" }));
+    }
+
+    // 2. Start New Turn
+    session.turn.id++;
+    session.turn.active = true;
+    session.turn.abortController = new AbortController();
+    
+    // 3. VAD/STT Transaction Lock
+    if (session.isProcessing) {
+        // If Deepgram is already actively listening, we don't need to open it again.
+        // We just let the audio flow.
+        return;
     }
 
     session.isProcessing = true; // LOCK
-    log("speech_start", { sessionId });
+    log("speech_start", { sessionId, turnId: session.turn.id });
 
     const dgStream = createDeepgramStream();
     session.deepgramStream = dgStream;
@@ -226,13 +283,14 @@ wss.on("connection", (ws) => {
       
       if (!text) {
         log("empty_transcript", { sessionId });
-        session.isProcessing = false; // UNLOCK
+        session.isProcessing = false; // UNLOCK STT
+        session.turn.active = false; // Turn Invalid
         return;
       }
 
-      // Proceed to LLM Transaction
-      await finalizeTurn(session, ws);
-      session.isProcessing = false; // UNLOCK (after TTS/LLM/Error)
+      // Proceed to LLM Transaction with current Turn ID
+      session.isProcessing = false; // UNLOCK STT (Before LLM starts)
+      await finalizeTurn(session, ws, session.turn.id);
     });
 
     dgStream.on("error", (err) => {
