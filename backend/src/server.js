@@ -3,6 +3,7 @@ const WebSocket = require("ws");
 const { createDeepgramStream } = require("./stt/deepgram");
 const { callGroq } = require("./llm/groq");
 const VAD = require("./vad");
+const { textToSpeech } = require("./tts/deepgram");
 
 const PORT = 3001;
 const FRAME_SIZE_BYTES = 640; // 20ms @ 16kHz, mono, 16-bit PCM
@@ -31,20 +32,11 @@ function validateConversation(conversation) {
 }
 
 async function finalizeTurn(session, ws) {
-  if (session.turnLocked) return;
-  session.turnLocked = true;
-  if (session.turnTimer) {
-    clearTimeout(session.turnTimer);
-    session.turnTimer = null;
-  }
-  session.awaitingFinalSTT = false;
-
   const userText = session.finalTranscript.trim();
   session.finalTranscript = "";
 
   if (!userText) {
     log("empty_transcript", { sessionId: session.id });
-    session.turnLocked = false;
     return;
   }
 
@@ -88,10 +80,44 @@ async function finalizeTurn(session, ws) {
       content: response.text,
     });
 
+    session.isSpeaking = true;
+
+    // Send AI response to frontend
     ws.send(JSON.stringify({
-      type: "ai_response",
+      type: "ai_response_text",
       text: response.text,
     }));
+
+    // TTS PIPELINE START
+    log("tts_start", { sessionId: session.id, textLength: response.text.length });
+    const ttsStartTime = Date.now();
+
+    try {
+        const audioBuffer = await textToSpeech(response.text);
+        const ttsLatency = Date.now() - ttsStartTime;
+
+        log("tts_complete", { 
+            sessionId: session.id, 
+            latency: ttsLatency, 
+            audioSize: audioBuffer.length 
+        });
+
+        // Deterministic Send
+        ws.send(JSON.stringify({
+            type: "tts_audio",
+            audio: audioBuffer.toString("base64"),
+            format: "linear16",
+            sampleRate: 16000
+        }));
+
+    } catch (ttsError) {
+        log("tts_error", { 
+            sessionId: session.id, 
+            error: ttsError.message,
+            latency: Date.now() - ttsStartTime
+        });
+    }
+    // TTS PIPELINE END
 
     const e2eLatency = Date.now() - session.metrics.sttStart;
     log("turn_complete", {
@@ -100,16 +126,16 @@ async function finalizeTurn(session, ws) {
       llmLatency,
       e2eLatency,
     });
+    
   } catch (err) {
     log("groq_error", { sessionId: session.id, error: err.message });
   }
-  session.turnLocked = false;
 }
 
 wss.on("connection", (ws) => {
   const sessionId = Math.random().toString(36).slice(2, 8);
 
-    const session = {
+  const session = {
     id: sessionId,
     conversation: [],
     deepgramStream: null,
@@ -117,9 +143,8 @@ wss.on("connection", (ws) => {
     finalTranscript: "",
     audioBuffer: Buffer.alloc(0),
     audioBacklog: [], 
-    awaitingFinalSTT: false,
-    turnTimer: null,
-    turnLocked: false,
+    isProcessing: false, // Global Lock for the Transaction
+    isSpeaking: false,   // TTS Lock
     context: "You are a helpful, concise voice assistant.",
     metrics: {
       sttStart: 0,
@@ -133,9 +158,8 @@ wss.on("connection", (ws) => {
     sampleRate: 16000,
     frameDurationMs: 20,
     speechMultiplier: 2.2,
-    silenceMultiplier: 1.3,
-    hangoverTimeMs: 800, // 800ms silence required to stop
-    // minSpeechFrames defaults to 15 (300ms) in VAD class now
+    silenceMultiplier: 1.2,
+    hangoverTimeMs: 2500, // Balanced hang time for natural turn-taking
     calibrationDurationMs: 1500,
   });
 
@@ -151,22 +175,22 @@ wss.on("connection", (ws) => {
   });
 
   vad.on("speech_start", () => {
-    if (session.turnTimer) {
-      clearTimeout(session.turnTimer);
-      session.turnTimer = null;
-      session.awaitingFinalSTT = false;
+    // 1. Transaction Lock Check
+    if (session.isProcessing || session.isSpeaking) {
+      log("speech_start_ignored", { sessionId, reason: session.isSpeaking ? "tts_active" : "processing_active" });
+      return;
     }
 
+    session.isProcessing = true; // LOCK
     log("speech_start", { sessionId });
 
     const dgStream = createDeepgramStream();
     session.deepgramStream = dgStream;
     session.deepgramReady = false;
     session.finalTranscript = "";
-    // Keep backlog until injected; clear only after stream opens
     session.metrics.sttStart = Date.now();
 
-    // Start with the backlog so we don't lose the first syllable
+    // Inject Backlog
     const packetQueue = [...session.audioBacklog];
     session.audioBacklog = [];
     let pendingClose = false;
@@ -183,10 +207,7 @@ wss.on("connection", (ws) => {
       log("deepgram_open", { sessionId });
 
       if (dgStream._packetQueue.length > 0) {
-        log("deepgram_flush_queue", {
-          sessionId,
-          packets: dgStream._packetQueue.length,
-        });
+        // flush queue
         dgStream._packetQueue.forEach((pkt) => dgStream.send(pkt));
         dgStream._packetQueue = [];
       }
@@ -197,12 +218,26 @@ wss.on("connection", (ws) => {
       }
     });
 
-    dgStream.on("close", () => {
+    // 4. Critical: The CLOSE event drives the next step
+    dgStream.on("close", async () => {
       log("deepgram_closed", { sessionId });
+      
+      const text = session.finalTranscript.trim();
+      
+      if (!text) {
+        log("empty_transcript", { sessionId });
+        session.isProcessing = false; // UNLOCK
+        return;
+      }
+
+      // Proceed to LLM Transaction
+      await finalizeTurn(session, ws);
+      session.isProcessing = false; // UNLOCK (after TTS/LLM/Error)
     });
 
     dgStream.on("error", (err) => {
       log("deepgram_error", { sessionId, error: err.message });
+      session.isProcessing = false; // Emergency Unlock
     });
 
     dgStream.on("Results", (data) => {
@@ -212,12 +247,6 @@ wss.on("connection", (ws) => {
       if (data.is_final) {
         session.finalTranscript += alt.transcript + " ";
         log("stt_final", { sessionId, text: alt.transcript });
-
-        // Trigger LLM immediately after final STT if silence was already detected
-        if (session.awaitingFinalSTT && !session.turnLocked) {
-          session.awaitingFinalSTT = false;
-          finalizeTurn(session, ws);
-        }
       } else {
         log("stt_partial", { sessionId, text: alt.transcript });
       }
@@ -228,17 +257,12 @@ wss.on("connection", (ws) => {
 
   vad.on("speech_stop", () => {
     log("speech_stop", { sessionId });
-
-    session.awaitingFinalSTT = true;
-
-    // Short silence window: finalize fast if STT final does not arrive
-    session.turnTimer = setTimeout(() => {
-      session.turnTimer = null;
-      if (!session.turnLocked) {
-        finalizeTurn(session, ws);
-      }
-    }, 800);
-
+    
+    // 3. Graceful Finish
+    // We do NOT call `finalizeTurn` here. 
+    // We only tell Deepgram "We are done sending audio".
+    // Deepgram will process remaining buffer, send final results, then emit 'close'.
+    
     const dgStream = session.deepgramStream;
     session.deepgramStream = null;
     session.deepgramReady = false;
@@ -249,10 +273,22 @@ wss.on("connection", (ws) => {
       } else {
         dgStream._markPendingClose?.();
       }
+    } else {
+        // If stream was never created or already gone, ensure unlock
+        session.isProcessing = false; 
     }
   });
 
   ws.on("message", (data) => {
+    try {
+      const msg = JSON.parse(data.toString());
+      if (msg.type === "tts_finished") {
+        session.isSpeaking = false;
+        log("tts_finished", { sessionId });
+        return;
+      }
+    } catch (_) {}
+
     session.audioBuffer = Buffer.concat([
       session.audioBuffer,
       Buffer.from(data),
@@ -262,15 +298,18 @@ wss.on("connection", (ws) => {
       const frame = session.audioBuffer.slice(0, FRAME_SIZE_BYTES);
       session.audioBuffer = session.audioBuffer.slice(FRAME_SIZE_BYTES);
 
-      // Update Backlog (keep last 30 frames = 600ms)
+      // Backlog Management
       session.audioBacklog.push(frame);
       if (session.audioBacklog.length > 30) {
         session.audioBacklog.shift();
       }
 
-      if (!session.turnLocked) {
-        session.vad.process(frame);
-      }
+      // VAD Processing
+      // Only process VAD if we are NOT currently locked in a transaction
+      // Exception: We DO process VAD if we are in state 'SPEAKING' (to detect stop)
+      // Complexity: We need to know if *this session's* VAD is active. 
+      // Simplified: Just always run VAD state machine, but `speech_start` event is gated.
+      session.vad.process(frame);
 
       if (
         session.vad.state === "SPEAKING" &&
