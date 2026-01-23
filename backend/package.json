@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
- 
   "scripts": {
     "start": "node src/server.js",
     "test-groq": "node test-groq.js"
@@ -14,6 +13,7 @@
     "@deepgram/sdk": "^4.11.3",
     "dotenv": "^17.2.3",
     "groq-sdk": "^0.37.0",
+    "node-fetch": "^3.3.2",
     "ws": "^8.19.0"
   }
 }
