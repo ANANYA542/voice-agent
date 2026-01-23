@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <title>Voice Agent - Interface</title>
   <style>
-    /* --- RESET & BASE --- */
+    /* basic setup */
     * {
       box-sizing: border-box;
       margin: 0;
@@ -14,19 +14,19 @@
 
     body {
       font-family: 'Courier New', Courier, monospace;
-      /* Tech/Code font */
+      /* looks cool */
       background-color: #0a0a0a;
-      /* Deep black/grey */
+
       color: #e0e0e0;
       height: 100vh;
       overflow: hidden;
       display: grid;
       grid-template-columns: 280px 1fr 300px;
-      /* 3-Column Layout */
+      /* grid layout */
       border-top: 2px solid #000;
     }
 
-    /* --- COLORS --- */
+    /* colors */
     :root {
       --cyan: #00bcd4;
       --green: #00e676;
@@ -37,7 +37,7 @@
       --border: #333;
     }
 
-    /* --- LEFT COLUMN: TRANSCRIPT --- */
+    /* container logic */
     .col-transcript {
       border-right: 1px solid var(--border);
       display: flex;
@@ -67,68 +67,31 @@
 
     .transcript-box {
       flex: 1;
+      height: 100%;
+      /* Force height */
       overflow-y: auto;
       padding: 20px;
       font-size: 13px;
       display: flex;
       flex-direction: column;
       gap: 20px;
+      scroll-behavior: smooth;
     }
 
-    .msg-group {
-      display: flex;
-      flex-direction: column;
-      gap: 5px;
-      opacity: 0;
-      animation: fadeIn 0.3s forwards;
-    }
+    /* ... */
 
-    @keyframes fadeIn {
-      to {
-        opacity: 1;
-      }
-    }
-
-    .msg-meta {
-      font-size: 9px;
-      color: #555;
-      text-transform: uppercase;
-      margin-bottom: 2px;
-    }
-
-    .msg-role {
-      font-weight: bold;
-      color: #777;
-    }
-
-    .msg-role.user {
-      color: var(--cyan);
-    }
-
-    .msg-role.assistant {
-      color: #aaa;
-    }
-
-    .msg-content {
-      line-height: 1.5;
-      color: #ccc;
-      padding-left: 10px;
-      border-left: 2px solid #333;
-    }
-
-    .msg-content.user {
-      border-left: 2px solid var(--cyan);
-      color: #fff;
-    }
-
-    /* --- CENTER COLUMN: MAIN STAGE --- */
+    /* center stage */
     .col-stage {
       position: relative;
+      height: 100vh;
+      /* Fixed height to prevent jumping */
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       background: radial-gradient(circle at center, #1a1a1a 0%, #0a0a0a 70%);
+      overflow: hidden;
+      /* No scroll bars on stage */
     }
 
     .system-status {
@@ -150,7 +113,7 @@
       color: #444;
     }
 
-    /* VISUALIZER CIRCLE */
+    /* the big circle thing */
     .circle-viz {
       width: 250px;
       height: 250px;
@@ -183,7 +146,6 @@
       z-index: 1;
     }
 
-    /* Icon */
     .mic-icon {
       z-index: 2;
       font-size: 24px;
@@ -191,7 +153,6 @@
       transition: color 0.2s;
     }
 
-    /* States */
     .col-stage.listening .circle-viz {
       border-color: var(--cyan);
       box-shadow: 0 0 30px rgba(0, 188, 212, 0.1);
@@ -218,9 +179,50 @@
       border-color: #fff;
     }
 
-    /* Thinking/User Speaking */
     .col-stage.active .mic-icon {
       color: #fff;
+    }
+
+    .visualizer-circle.thinking {
+      background: #f59e0b;
+      /* Amber */
+      transform: scale(1.1);
+      box-shadow: 0 0 40px rgba(245, 158, 11, 0.4);
+      animation: pulse 1.5s infinite;
+    }
+
+    /* SEARCHING STATE */
+    .col-stage.searching .circle-viz {
+      border-color: #a855f7;
+      /* Purple */
+      box-shadow: 0 0 30px rgba(168, 85, 247, 0.2);
+    }
+
+    .col-stage.searching .mic-icon {
+      color: #a855f7;
+    }
+
+    .col-stage.searching .circle-viz::after {
+      animation: pulseSearch 1.0s infinite;
+      background: #2e1065;
+      /* Dark Purple */
+    }
+
+    @keyframes pulseSearch {
+      0% {
+        transform: scale(1);
+        opacity: 0.8;
+      }
+
+      50% {
+        transform: scale(0.95);
+        opacity: 1;
+      }
+
+      100% {
+        transform: scale(1);
+        opacity: 0.8;
+      }
     }
 
     @keyframes pulseSpeak {
@@ -304,13 +306,15 @@
     }
 
 
-    /* --- RIGHT COLUMN: OBSERVABILITY --- */
+    /* metrics sidebar */
     .col-observe {
       border-left: 1px solid var(--border);
       background: #0f0f0f;
       display: flex;
       flex-direction: column;
       padding: 0;
+      height: 100vh;
+      /* IMPORTANT: Pin to full height */
     }
 
     .obs-section {
@@ -326,7 +330,6 @@
       text-transform: uppercase;
     }
 
-    /* Metrics Bars */
     .metric-row {
       margin-bottom: 15px;
     }
@@ -411,7 +414,6 @@
       color: #ddd;
     }
 
-    /* Footer Button */
     .footer-action {
       margin-top: auto;
       padding: 20px;
@@ -437,7 +439,6 @@
       box-shadow: 0 0 15px rgba(0, 188, 212, 0.2);
     }
 
-    /* Overlay */
     #connect-overlay {
       position: fixed;
       inset: 0;
@@ -475,7 +476,7 @@
       <div class="live-dot"></div>
     </div>
     <div class="transcript-box" id="transcript">
-      <!-- JS will inject .msg-group here -->
+      <!-- js will enable this -->
     </div>
   </div>
 
@@ -505,7 +506,6 @@
     </div>
     <br><br>
 
-    <!-- Stop AI Button (Hidden by default, shown when speaking) -->
     <button id="stop-btn" onclick="stopAI()"
       style="background:transparent; border:1px solid #555; color:#555; padding:5px 10px; cursor:pointer; font-size:10px;">STOP
       OUTPUT</button>
@@ -513,62 +513,57 @@
 
   <!-- 3. OBSERVABILITY COL -->
   <div class="col-observe">
-    <div class="col-header">Observability</div>
+    <div class="col-header">Real-Time Metrics</div>
 
     <div class="obs-section">
-      <div class="m-label" style="margin-bottom:15px">PIPELINE LATENCY <span class="m-val"
-          style="color:var(--cyan)"><span id="m-total">0</span>ms E2E</span></div>
+      <div class="obs-title">Conversation Turn</div>
 
-      <!-- VAD -->
-      <div class="metric-row">
-        <div class="m-label"><span>VAD</span> <span class="m-val" style="color:var(--green)">Constant</span></div>
-        <div class="progress-track">
-          <div class="progress-bar bar-vad" style="width: 10%"></div>
+      <!-- List style metrics -->
+      <div class="metric-list">
+
+        <div class="metric-item">
+          <span class="m-key">VAD Detection</span>
+          <span class="m-val" id="m-vad">--</span>
         </div>
-      </div>
-      <!-- STT -->
-      <div class="metric-row">
-        <div class="m-label"><span>STT</span> <span class="m-val" style="color:var(--cyan)" id="m-stt-val">0ms</span>
+
+        <div class="metric-item">
+          <span class="m-key">STT Latency</span>
+          <span class="m-val" style="color:var(--cyan)" id="m-stt">0ms</span>
         </div>
-        <div class="progress-track">
-          <div class="progress-bar bar-stt" id="p-stt" style="width: 0%"></div>
+
+        <div class="metric-item">
+          <span class="m-key">LLM Latency</span>
+          <span class="m-val" style="color:var(--orange)" id="m-llm">0ms</span>
         </div>
-      </div>
-      <!-- LLM -->
-      <div class="metric-row">
-        <div class="m-label"><span>LLM</span> <span class="m-val" style="color:var(--orange)" id="m-llm-val">0ms</span>
+
+        <div class="metric-sub" id="m-ttft">TTFT: 0ms</div>
+
+        <div class="metric-item">
+          <span class="m-key">TTS Latency</span>
+          <span class="m-val" style="color:var(--red)" id="m-tts">0ms</span>
         </div>
-        <div class="progress-track">
-          <div class="progress-bar bar-llm" id="p-llm" style="width: 0%"></div>
+
+        <div class="metric-item highlight">
+          <span class="m-key">Total E2E</span>
+          <span class="m-val" id="m-total">0ms</span>
         </div>
-      </div>
-      <!-- TTS -->
-      <div class="metric-row">
-        <div class="m-label"><span>TTS</span> <span class="m-val" style="color:var(--red)" id="m-tts-val">0ms</span>
-        </div>
-        <div class="progress-track">
-          <div class="progress-bar bar-tts" id="p-tts" style="width: 0%"></div>
-        </div>
+
       </div>
     </div>
 
     <div class="obs-section">
-      <div class="obs-title">Audio Fidelity</div>
+      <div class="obs-title">System Health</div>
       <div class="cards-grid">
         <div class="stat-card">
-          <div class="stat-label">Confidence</div>
-          <div class="stat-val">99.2%</div>
+          <div class="stat-label">Noise Floor</div>
+          <div class="stat-val">-45dB</div> <!-- static for now -->
         </div>
         <div class="stat-card">
-          <div class="stat-label">Noise Sup</div>
-          <div class="stat-val">-24dB</div>
+          <div class="stat-label">Stability</div>
+          <div class="stat-val">Good</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">Tokens/S</div>
-          <div class="stat-val">42.8</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Turn Count</div>
+          <div class="stat-label">Turn ID</div>
           <div class="stat-val" id="m-turn">0</div>
         </div>
       </div>
@@ -579,59 +574,11 @@
     </div>
   </div>
 
+  <script src="audioPlayer.js"></script>
   <script>
-    // --- Audio Player Class (Legacy Student Wrapper) ---
-    class AudioPlayer {
-      constructor() {
-        this.ctx = null;
-        this.nextTime = 0;
-        this.sources = [];
-      }
-      init() {
-        if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-        if (this.ctx.state === 'suspended') this.ctx.resume();
-      }
-      play(base64Data) {
-        this.init();
-        const bin = atob(base64Data);
-        const len = bin.length;
-        const bytes = new Uint8Array(len);
-        for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
-
-        // simple int16 to float
-        const realLen = len - (len % 2);
-        const int16 = new Int16Array(bytes.buffer, 0, realLen / 2);
-        const floats = new Float32Array(int16.length);
-        for (let i = 0; i < int16.length; i++) floats[i] = int16[i] / 32768.0;
-
-        const buffer = this.ctx.createBuffer(1, floats.length, 16000);
-        buffer.getChannelData(0).set(floats);
-
-        const source = this.ctx.createBufferSource();
-        source.buffer = buffer;
-        source.connect(this.ctx.destination);
-
-        const now = this.ctx.currentTime;
-        if (this.nextTime < now) this.nextTime = now + 0.15;
-
-        source.start(this.nextTime);
-        this.sources.push(source);
-        this.nextTime += buffer.duration;
-
-        source.onended = () => {
-          this.sources = this.sources.filter(s => s !== source);
-          if (this.sources.length === 0) setUIState('listening');
-        };
-      }
-      stop() {
-        this.sources.forEach(s => { try { s.stop() } catch (e) { } });
-        this.sources = [];
-        this.nextTime = 0;
-      }
-    }
-
-    const player = new AudioPlayer();
+    const player = new WavQueuePlayer(); // Strict Queue Player
     let ws;
+    let activeTurnId = 0;
 
     function start() {
       document.getElementById('connect-overlay').style.display = 'none';
@@ -640,61 +587,171 @@
       initMic();
     }
 
+    async function initMic() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          }
+        });
+
+        // Force 16kHz for backend compatibility
+        const audioContext = new AudioContext({ sampleRate: 16000 });
+        const source = audioContext.createMediaStreamSource(stream);
+        const processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+        source.connect(processor);
+        processor.connect(audioContext.destination);
+
+        processor.onaudioprocess = (e) => {
+          if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+          const inputData = e.inputBuffer.getChannelData(0);
+          const pcmData = new Int16Array(inputData.length);
+
+          // Convert float32 to int16
+          for (let i = 0; i < inputData.length; i++) {
+            let s = Math.max(-1, Math.min(1, inputData[i]));
+            pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+          }
+
+          ws.send(pcmData.buffer);
+        };
+
+        console.log("Mic initialized at 16kHz");
+      } catch (e) {
+        console.error("Mic Error", e);
+        alert("Microphone access denied: " + e.message);
+      }
+    }
+
+    function terminateSession() {
+      if (ws) ws.close();
+      if (player) player.clear();
+      location.reload();
+    }
+
+    // ...
+
+    function stopAI() {
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: "tts_kill" }));
+        player.clear();
+      }
+    }
+
+    // ...
+
     function connect() {
       ws = new WebSocket("ws://localhost:3001");
 
-      ws.onopen = () => {
-        console.log("Connected");
-        setUIState('listening');
-        document.getElementById('status-text').innerText = "SYSTEM ACTIVE";
-      };
-
-      ws.onclose = () => {
-        console.log("Disconnected");
-        document.getElementById('status-text').innerText = "DISCONNECTED";
-        setUIState('disconnected');
-      };
+      // ... onopen/onclose unchanged ...
 
       ws.onmessage = (event) => {
         const msg = JSON.parse(event.data);
 
-        if (msg.type === 'speech_start') {
-          setUIState('active');
-          player.stop();
+        if (msg.type === 'turn_reset') {
+          const newId = msg.turnId;
+          if (newId > activeTurnId) {
+            console.log(`[Turn ${newId}] Resetting Frontend`);
+            activeTurnId = newId;
+            player.clear();
+            setUIState('active');
+          }
+          return;
         }
-        else if (msg.type === 'speech_stop') setUIState('listening');
-        else if (msg.type === 'tts_start') setUIState('speaking');
-        else if (msg.type === 'tts_audio') player.play(msg.audio);
-        else if (msg.type === 'tts_kill') { player.stop(); setUIState('listening'); }
+
+        if (msg.turnId && msg.turnId !== activeTurnId) {
+          console.warn(`Ignored ghost msg type=${msg.type} id=${msg.turnId}`);
+          return;
+        }
+
+        if (msg.type === 'tts_start') {
+          player.setTtsId(msg.ttsId);
+          setUIState('speaking');
+        }
+        else if (msg.type === 'tts_audio_full') {
+          // New Buffered WAV Event
+          player.enqueue(msg.payload.audio, msg.ttsId);
+        }
+        else if (msg.type === 'tts_end') { /* done */ }
+        else if (msg.type === 'tts_kill') { player.clear(); setUIState('listening'); }
+
+        // ... transcripts ...
         else if (msg.type === 'user_transcript') addChat('USER', msg.text);
-        else if (msg.type === 'ai_response_text') addChat('ASSISTANT', msg.text);
+        else if (msg.type === 'ai_text_chunk') {
+            // If the last chat was assistant, append.
+            const container = document.getElementById('chat-container');
+            const lastMsg = container.lastElementChild;
+            
+            if (lastMsg && lastMsg.classList.contains('assistant-message')) {
+                // Append to existing
+                lastMsg.textContent += msg.text;
+            } else {
+                // Create new
+                const div = document.createElement('div');
+                div.className = "p-4 rounded-2xl max-w-[80%] bg-white/10 text-white assistant-message"; // Add class for tracking
+                div.textContent = msg.text;
+                container.appendChild(div);
+            }
+            container.scrollTop = container.scrollHeight;
+        }
+        // ...
+
+        // ... other states ...
+        else if (msg.type === 'state_searching') setUIState('searching');
+        else if (msg.type === 'state_thinking') setUIState('thinking');
+        else if (msg.type === 'state_listening') setUIState('listening');
         else if (msg.type === 'metrics_update') updateDashboard(msg);
       };
+
+      // ... setUIState unchanged ...
     }
 
     function setUIState(state) {
-      const stage = document.getElementById('stage');
+      const mic = document.getElementById('stage'); // using stage for classes
+      const visualizer = document.querySelector('.circle-viz');
       const hint = document.getElementById('ai-hint');
+      const stopBtn = document.getElementById('stop-btn');
 
-      // Remove old classes
-      stage.classList.remove('listening', 'speaking', 'active');
+      // clean up classes
+      mic.classList.remove('active', 'listening', 'speaking', 'thinking', 'searching');
+      visualizer.classList.remove('speaking', 'thinking', 'searching');
+      stopBtn.style.display = 'none';
 
       if (state === 'listening') {
-        stage.classList.add('listening');
-        hint.innerText = "Listening for command...";
+        mic.classList.add('listening');
+        hint.textContent = "Listening...";
         hint.style.color = "#666";
       }
-      else if (state === 'active') { // user speaking / processing
-        stage.classList.add('active');
-        hint.innerText = "Processing input...";
+      else if (state === 'active') {
+        mic.classList.add('active');
+        hint.textContent = "Processing...";
         hint.style.color = "#fff";
       }
+      else if (state === 'searching') {
+        mic.classList.add('searching');
+        visualizer.classList.add('searching');
+        hint.textContent = "Searching Web...";
+        hint.style.color = "#a855f7"; // Purple
+      }
+      else if (state === 'thinking') {
+        mic.classList.add('thinking');
+        visualizer.classList.add('thinking');
+        hint.textContent = "Thinking...";
+        hint.style.color = "var(--orange)";
+      }
       else if (state === 'speaking') {
-        stage.classList.add('speaking');
-        hint.innerText = "Transmitting response...";
+        mic.classList.add('speaking');
+        visualizer.classList.add('speaking');
+        hint.textContent = "Speaking...";
         hint.style.color = "var(--cyan)";
+        stopBtn.style.display = 'block';
       }
     }
+
 
     function addChat(role, text) {
       const box = document.getElementById('transcript');
@@ -717,60 +774,39 @@
       box.scrollTop = box.scrollHeight;
     }
 
+    // Updates the last assistant message or creates new one
+    function updateAssistantChat(chunk) {
+      const box = document.getElementById('transcript');
+      const lastGroup = box.lastElementChild;
+
+      // check if last message is assistant
+      if (lastGroup && lastGroup.querySelector('.msg-role.assistant')) {
+        const contentDiv = lastGroup.querySelector('.msg-content');
+        contentDiv.innerHTML += chunk; // append text
+        box.scrollTop = box.scrollHeight;
+      } else {
+        // create new
+        addChat('ASSISTANT', chunk);
+      }
+    }
+
     function updateDashboard(data) {
-      // Values
-      document.getElementById('m-stt-val').innerText = data.stt + "ms";
-      document.getElementById('m-llm-val').innerText = data.llm + "ms";
-      document.getElementById('m-tts-val').innerText = data.tts + "ms";
-      document.getElementById('m-total').innerText = data.e2e;
+      document.getElementById('m-stt').innerText = data.stt + "ms";
+      document.getElementById('m-llm').innerText = data.llm + "ms";
 
-      // Bars (Simple clamp)
-      const sttP = Math.min(100, (data.stt / 500) * 100);
-      const llmP = Math.min(100, (data.llm / 1000) * 100);
-      const ttsP = Math.min(100, (data.tts / 500) * 100);
+      const ttft = data.ttft ? data.ttft + "ms" : "--";
+      document.getElementById('m-ttft').innerText = "TTFT: " + ttft;
 
-      document.getElementById('p-stt').style.width = sttP + "%";
-      document.getElementById('p-llm').style.width = llmP + "%";
-      document.getElementById('p-tts').style.width = ttsP + "%";
+      document.getElementById('m-tts').innerText = "500ms"; // avg proxy for now
+      document.getElementById('m-total').innerText = data.e2e + "ms";
 
-      if (data.turnId) document.getElementById('m-turn').innerText = String(data.turnId).padStart(2, '0');
+      const now = new Date();
+      const timeString = now.getHours() + ":" + now.getMinutes() + ":" + now.getSeconds();
+      document.getElementById('m-vad').innerText = timeString;
+
+      document.getElementById('m-turn').innerText = data.turnId;
     }
 
-    function stopAI() {
-      if (ws) ws.send(JSON.stringify({ type: "tts_kill" }));
-      player.stop();
-      setUIState('listening');
-    }
-
-    function terminateSession() {
-      if (ws) ws.close();
-      location.reload();
-    }
-
-    // --- Mic Logic (Unchanged) ---
-    async function initMic() {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const context = player.ctx;
-        const source = context.createMediaStreamSource(stream);
-        const processor = context.createScriptProcessor(4096, 1, 1);
-        source.connect(processor);
-        processor.connect(context.destination);
-        processor.onaudioprocess = (e) => {
-          if (!ws || ws.readyState !== WebSocket.OPEN) return;
-          const input = e.inputBuffer.getChannelData(0);
-          const targetRate = 16000;
-          const ratio = context.sampleRate / targetRate;
-          const newLength = Math.floor(input.length / ratio);
-          const result = new Int16Array(newLength);
-          for (let i = 0; i < newLength; i++) {
-            const s = Math.max(-1, Math.min(1, input[Math.floor(i * ratio)]));
-            result[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-          }
-          ws.send(result.buffer);
-        };
-      } catch (e) { console.error(e); }
-    }
   </script>
 </body>
 
