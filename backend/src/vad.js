@@ -4,39 +4,44 @@ class VAD extends EventEmitter {
   constructor(options) {
     super();
 
-    // Settings
+    // config
     this.sampleRate = options.sampleRate || 16000;
     this.frameMs = options.frameDurationMs || 20;
 
-    // Thresholds - Calibrated manually
-    this.energyThreshold = 500; // start low
+    // played around with these numbers until it worked
+    this.energyThreshold = 500; 
     this.speechThreshold = 2000;
     this.silenceThreshold = 800;
     
     this.speechMultiplier = 2.2;
     this.silenceMultiplier = 1.2;
 
-    this.state = "CALIBRATING"; // start by listening to background noise
+    this.state = "CALIBRATING"; // need to figure out room noise first
 
-    // Counters
+    // counters
     this.speechCount = 0;
     this.silenceCount = 0;
     this.calibrationCount = 0;
 
-    // Tuning
-    // need 15 frames (300ms) to say "speech started"
-    this.minSpeechFrames = 15; 
+    this.minSpeechFrames = 5; // changed to 5, 15 was too slow
     
-    // hold on for 2.5s after silence to not cut off
-    this.hangoverMs = options.hangoverTimeMs || 2500;
+    // prevent cutting off too early
+    this.hangoverMs = options.hangoverTimeMs || 800;
     this.hangoverFrames = this.hangoverMs / this.frameMs;
 
-    this.calibrationMax = 75; // frames to calibrate (1.5s)
+    this.calibrationMax = 40; 
     this.noiseLevels = [];
+    this.debugCounter = 0;
   }
 
   process(frameBuffer) {
     const energy = this.calculateRMS(frameBuffer);
+    
+    // print stuff sometimes so I know it's working
+    this.debugCounter++;
+    if (this.debugCounter % 50 === 0) {
+        console.log(`[VAD] State: ${this.state}, Energy: ${energy.toFixed(2)}, Threshold: ${this.speechThreshold?.toFixed(2)}`);
+    }
 
     if (this.state === "CALIBRATING") {
       this.doCalibration(energy);
@@ -49,7 +54,7 @@ class VAD extends EventEmitter {
 
   calculateRMS(buffer) {
     let sum = 0;
-    // 16-bit audio, so step by 2
+    // 16-bit audio
     for (let i = 0; i < buffer.length; i += 2) {
       const val = buffer.readInt16LE(i);
       sum += val * val;
@@ -62,19 +67,19 @@ class VAD extends EventEmitter {
     this.calibrationCount++;
 
     if (this.calibrationCount >= this.calibrationMax) {
-      console.log("Calibration done!");
-      
       const sum = this.noiseLevels.reduce((a, b) => a + b, 0);
       const avg = sum / this.noiseLevels.length;
 
       this.noiseFloor = avg;
       
-      // Set thresholds based on noise
-      this.speechThreshold = avg * this.speechMultiplier;
-      this.silenceThreshold = avg * this.silenceMultiplier;
+      // dynamic thresholds
+      this.speechThreshold = avg * 1.3; 
+      this.silenceThreshold = avg * 1.1; 
 
-      // make sure it's not too sensitive
-      if (this.speechThreshold < 200) this.speechThreshold = 200;
+      // safety floor for quiet rooms
+      if (this.speechThreshold < 20) this.speechThreshold = 20; 
+      
+      console.log(`Calibration done! Floor: ${avg.toFixed(2)}, Speech Thresh: ${this.speechThreshold.toFixed(2)}`);
 
       this.state = "SILENCE";
       this.emit("calibration_complete", { noiseFloor: avg });
@@ -92,6 +97,7 @@ class VAD extends EventEmitter {
       this.state = "SPEAKING";
       this.silenceCount = 0;
       this.emit("speech_start");
+      console.log("[VAD] Triggered Speech Start");
     }
   }
 
@@ -102,12 +108,26 @@ class VAD extends EventEmitter {
         this.silenceCount = 0;
     }
 
-    // if silent for long enough, stop
     if (this.silenceCount > this.hangoverFrames) {
         this.state = "SILENCE";
         this.speechCount = 0;
         this.emit("speech_stop");
     }
+  }
+
+  setMode(mode) {
+      if (!this.noiseFloor) return; 
+      
+      console.log(`[VAD] Mode: ${mode}`);
+      if (mode === "speaking") {
+          // turn off vad when ai is talking so it doesnt hear itself
+          this.speechThreshold = this.noiseFloor * 4.0; 
+      } else {
+          // normal sensitivity
+          this.speechThreshold = this.noiseFloor * 1.3;
+      }
+      
+      if (this.speechThreshold < 20) this.speechThreshold = 20;
   }
 }
 

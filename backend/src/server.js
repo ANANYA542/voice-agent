@@ -1,7 +1,6 @@
 require("dotenv").config();
 const WebSocket = require("ws");
 const { createDeepgramStream } = require("./stt/deepgram");
-const { callGroq } = require("./llm/groq");
 const VAD = require("./vad");
 const { streamTextToSpeech } = require("./tts/deepgram");
 
@@ -11,139 +10,192 @@ const FRAME_SIZE = 640; // 20ms audio frame
 const wss = new WebSocket.Server({ port: PORT });
 console.log(`Server started on port ${PORT}`);
 
-// Helper to log stuff comfortably
-function log(msg, info) {
+// --- HELPERS ---
+
+// global log function so we can see what's happening
+function log(session, event, data = {}) {
   console.log(JSON.stringify({
-    time: Date.now(),
-    msg,
-    ...info
+    ts: Date.now(),
+    level: "info",
+    sessionId: session.id,
+    turnId: session.turn.id,
+    event,
+    ...data
   }));
 }
 
-// Clean up chat history so LLM doesn't get confused
 function cleanHistory(history) {
   return history.filter(m => m.content && m.content.length > 0);
 }
 
-// This handles the whole turn: Validation -> LLM -> TTS -> Dashboard
+// remove weird characters so TTS doesn't say them
+function sanitizeForTTS(text) {
+  return text
+    .replace(/\*/g, "")
+    .replace(/#/g, "")
+    .replace(/`/g, "")
+    .replace(/-/g, "")
+    .replace(/_/g, "")
+    .replace(/\n+/g, ". ")
+    .replace(/\s+/g, " ") 
+    .trim();
+}
+
+// --- TURN HANDLING ---
+
+const { streamGroq } = require("./llm/groq");
+
 async function handleTurn(session, ws, turnId) {
-  // Check if we are still processing the same turn
+  // ignore if this is an old turn
   if (turnId !== session.turn.id) return;
 
-  const userText = session.finalTranscript.trim();
-  session.finalTranscript = "";
+  // combine transcript parts
+  let userText = (session.finalTranscript + " " + (session.currentTranscript || "")).trim();
+  session.finalTranscript = ""; 
+  session.currentTranscript = "";
 
   if (!userText || userText.length < 2) {
-    console.log("Transcript too short, skipping");
+    console.log("Transcript too short");
     session.turn.active = false;
-    ws.send(JSON.stringify({ type: "state_listening" }));
+    ws.send(JSON.stringify({ type: "state_listening", turnId }));
     return;
   }
 
-  log("user_said", { text: userText });
-
-  // Update session
+  log(session, "user_said", { text: userText });
   session.metrics.turnCount++;
   session.history.push({ role: "user", content: userText });
-  ws.send(JSON.stringify({ type: "user_transcript", text: userText }));
+  ws.send(JSON.stringify({ type: "user_transcript", text: userText, turnId }));
 
-  // Call LLM
-  ws.send(JSON.stringify({ type: "groq_request_start" }));
+  // tell ui we are thinking
+  ws.send(JSON.stringify({ type: "state_thinking", turnId })); 
+  ws.send(JSON.stringify({ type: "groq_request_start", turnId }));
   const llmStart = Date.now();
+  
+  const messages = [
+    { role: "system", content: session.context },
+    ...cleanHistory(session.history),
+  ];
+
+  let fullResponse = "";
+  let sentenceBuffer = "";
+  let ttsStarted = false;
 
   try {
-    const messages = [
-      { role: "system", content: session.context },
-      ...cleanHistory(session.history),
-    ];
+    const stream = streamGroq(messages);
 
-    const response = await callGroq(messages);
-    const llmLatency = Date.now() - llmStart;
+    // stream tokens from llm
+    for await (const token of stream) {
+        // stop processing if user interrupted
+        if (turnId !== session.turn.id) break;
 
-    // Check barge-in again before playing
-    if (turnId !== session.turn.id) return;
+        fullResponse += token;
+        sentenceBuffer += token;
 
-    log("ai_response", { text: response.text, latency: llmLatency });
+        // try to find sentence boundaries to make it faster
+        if (/[.!?]\s/.test(sentenceBuffer) || /\n/.test(sentenceBuffer)) {
+            const match = sentenceBuffer.match(/([.!?\n]+)\s/);
+            if (match) {
+                const index = match.index + match[0].length;
+                const sentence = sentenceBuffer.substring(0, index).trim();
+                sentenceBuffer = sentenceBuffer.substring(index); // keep the rest
 
-    session.history.push({ role: "assistant", content: response.text });
-    ws.send(JSON.stringify({ type: "ai_response_text", text: response.text }));
-
-    // Start Speaking
-    ws.send(JSON.stringify({ type: "tts_start" }));
-    session.tts.status = "playing";
-
-    const ttsStart = Date.now();
-    let ttsLatency = 0;
-    let firstChunk = true;
-
-    const stream = await streamTextToSpeech(response.text);
-    const reader = stream.getReader();
-
-    while (true) {
-      // Emergency stop if user interrupted
-      if (turnId !== session.turn.id) {
-        console.log("TTS aborted by barge-in");
-        await reader.cancel();
-        break;
-      }
-
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      if (firstChunk) {
-        ttsLatency = Date.now() - ttsStart;
-        firstChunk = false;
-      }
-
-      // Stream audio chunk to frontend
-      ws.send(JSON.stringify({
-        type: "tts_audio",
-        audio: Buffer.from(value).toString("base64")
-      }));
+                if (sentence.length > 2) { 
+                   if (!ttsStarted) {
+                       ttsStarted = true;
+                       session.tts.id++; 
+                       session.tts.status = "playing";
+                       session.vad.setMode("speaking"); // ignore echo
+                       ws.send(JSON.stringify({ type: "tts_start", turnId, ttsId: session.tts.id }));
+                   }
+                   await processSentence(session, ws, turnId, sentence);
+                }
+            }
+        }
     }
 
+    // send whatever is left in the buffer
+    if (turnId === session.turn.id && sentenceBuffer.trim().length > 0) {
+        await processSentence(session, ws, turnId, sentenceBuffer.trim());
+    }
+
+    // done with turn
     if (turnId === session.turn.id) {
-      ws.send(JSON.stringify({ type: "tts_end" }));
-      session.tts.status = "idle";
+        session.history.push({ role: "assistant", content: fullResponse });
+        ws.send(JSON.stringify({ type: "ai_response_text", text: fullResponse, turnId }));
+        
+        ws.send(JSON.stringify({ type: "tts_end", turnId }));
+        session.tts.status = "idle";
+        session.vad.setMode("listening"); // back to normal sensitivity
+        
+        const e2e = Date.now() - session.metrics.sttStart;
+        ws.send(JSON.stringify({
+            type: "metrics_update",
+            stt: llmStart - session.metrics.sttStart,
+            llm: Date.now() - llmStart, 
+            tts: 0, 
+            e2e: e2e,
+            turnId
+        }));
     }
-
-    // Send metrics to the dashboard
-    const sttLat = Date.now() - session.metrics.sttStart;
-    const totalLat = Date.now() - session.metrics.sttStart;
-
-    ws.send(JSON.stringify({
-      type: "metrics_update",
-      stt: sttLat,
-      llm: llmLatency,
-      tts: ttsLatency,
-      e2e: totalLat,
-      turnId: session.turn.id
-    }));
 
   } catch (err) {
     console.error("Turn failed:", err);
     session.turn.active = false;
-    ws.send(JSON.stringify({ type: "state_listening" }));
+    ws.send(JSON.stringify({ type: "tts_error", message: "Turn failed", turnId }));
   }
 }
 
+// sends text to deepgram tts
+async function processSentence(session, ws, turnId, text) {
+    if (turnId !== session.turn.id) return;
+    
+    // clean up text first
+    const clean = sanitizeForTTS(text);
+    if (!clean) return;
+
+    try {
+        const audioStream = await streamTextToSpeech(clean);
+        const reader = audioStream.getReader();
+
+        while (true) {
+            // check for barge-in again
+            if (turnId !== session.turn.id) {
+                await reader.cancel();
+                break;
+            }
+
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            ws.send(JSON.stringify({
+                type: "tts_audio",
+                audio: Buffer.from(value).toString("base64"),
+                turnId,
+                ttsId: session.tts.id
+            }));
+        }
+    } catch(e) {
+        console.error("TTS Stream Error:", e.message);
+    }
+}
+
+// --- CONNECTION HANDLER ---
 
 wss.on("connection", (ws) => {
   const sessionId = Math.random().toString(36).substring(7);
-  console.log("New client connected:", sessionId);
+  console.log("Client connected:", sessionId);
 
   const session = {
     id: sessionId,
     history: [],
-    
-    // Audio buffers
     audioBuffer: Buffer.alloc(0),
     backlog: [],
     
-    // State
+    // state tracking
     deepgramStream: null,
     deepgramReady: false,
     finalTranscript: "",
+    currentTranscript: "",
     
     turn: {
       id: 0,
@@ -151,123 +203,210 @@ wss.on("connection", (ws) => {
       aborter: null
     },
     
+    tts: { 
+        id: 0, 
+        status: "idle" 
+    }, 
+    resumeTimer: null,
+    lastAgentText: "",
+
     context: "You are a helpful, concise voice assistant.",
-    metrics: { turnCount: 0 },
-    tts: { status: "idle" }
+    metrics: { turnCount: 0, sttStart: 0 }
   };
 
-  // VAD Setup
-  const vad = new VAD({
-    sampleRate: 16000,
+  function resetTurn(session, ws) {
+      // stop everything
+      session.turn.active = false;
+      session.tts.status = "idle";
+      session.lastAgentText = "";
+      session.vad?.setMode("listening"); // reset vad sensitivity
+      if (session.resumeTimer) clearTimeout(session.resumeTimer);
+
+      // kill pending requests
+      if (session.turn.aborter) {
+         session.turn.aborter.abort();
+         session.turn.aborter = new AbortController();
+      }
+
+      // clear buffers
+      session.finalTranscript = "";
+      session.currentTranscript = "";
+      session.backlog = [];
+
+      // tell frontend to stop
+      if (ws && ws.readyState === WebSocket.OPEN) {
+          session.tts.id++; // invalidate old chunks
+          ws.send(JSON.stringify({ type: "tts_kill", turnId: session.turn.id, ttsId: session.tts.id }));
+          ws.send(JSON.stringify({ type: "state_listening", turnId: session.turn.id }));
+      }
+      
+      log(session, "turn_reset", { reason: "reset_called" });
+  }
+
+  function setupDeepgram(session) {
+      if (session.deepgramStream) {
+          try { session.deepgramStream.finish(); } catch(e) {}
+          session.deepgramStream = null;
+      }
+
+      const dg = createDeepgramStream();
+      session.deepgramStream = dg;
+
+      dg.on("open", () => {
+          session.deepgramReady = true;
+          console.log("STT Ready");
+      });
+
+      dg.on("close", () => {
+          console.log("STT Closed");
+          session.deepgramReady = false;
+      });
+
+      dg.on("error", (e) => {
+          console.error("STT Error:", e.message);
+          session.deepgramReady = false;
+      });
+      
+      dg.on("Results", (data) => {
+        const res = data.channel?.alternatives?.[0];
+        if (res?.transcript) {
+            if (data.is_final) {
+                session.finalTranscript += res.transcript + " ";
+                session.currentTranscript = ""; 
+                console.log("Final:", res.transcript);
+            } else {
+                session.currentTranscript = res.transcript; 
+            }
+        }
+      });
+  }
+
+  // VAD setup
+  const vad = new VAD({ 
+    sampleRate: 16000, 
     frameDurationMs: 20,
-    hangoverTimeMs: 2500, // hold on for 2.5s to catch end of sentence
+    hangoverTimeMs: 800
   });
   session.vad = vad;
 
+  setupDeepgram(session);
 
-  // Persistent STT Connection
-  // We keep this open so we don't have to reconnect every time
-  const dg = createDeepgramStream(); // open it
-  session.deepgramStream = dg;
-
-  dg.on("open", () => {
-    console.log("Deepgram STT connected");
-    session.deepgramReady = true;
-  });
-
-  dg.on("error", (err) => console.log("STT Error:", err.message));
-
-  dg.on("Results", (data) => {
-    const result = data.channel?.alternatives?.[0];
-    if (result && result.transcript) {
-      if (data.is_final) {
-        session.finalTranscript += result.transcript + " ";
-        console.log("Got partial:", result.transcript);
-      }
-    }
-  });
-
-
-  // VAD Events
-  vad.on("speech_start", () => {
-    console.log("Processing speech start...");
-
-    // Barge-in: If we were already doing something, stop it
-    if (session.turn.active) {
-      console.log("Interruption detected! Stopping previous turn.");
-      if (session.turn.aborter) session.turn.aborter.abort();
-      session.turn.active = false;
-      ws.send(JSON.stringify({ type: "tts_kill" }));
-    }
-
-    // Start fresh turn
-    session.turn.id++;
+  function resumeSpeech() {
+    if (!session.lastAgentText) return;
+    console.log("Resuming speech...");
+    
+    ws.send(JSON.stringify({ type: "ai_response_text", text: "(Resuming...)" }));
+    
     session.turn.active = true;
-    session.turn.aborter = new AbortController();
+    session.tts.status = "playing";
+    ws.send(JSON.stringify({ type: "tts_start" }));
+
+    try {
+        // try to verify this logic later
+        const textKey = "Continuing. " + session.lastAgentText; 
+        streamTextToSpeech(textKey).then(async (stream) => { 
+            const reader = stream.getReader();
+            while (true) {
+                if (session.tts.status !== "playing") {
+                    await reader.cancel();
+                    break;
+                }
+                const { done, value } = await reader.read();
+                if (done) break;
+                ws.send(JSON.stringify({ type: "tts_audio", audio: Buffer.from(value).toString("base64") }));
+            }
+            if (session.tts.status === "playing") {
+                ws.send(JSON.stringify({ type: "tts_end" }));
+                session.tts.status = "idle";
+            }
+        });
+    } catch(e){ console.log("Resume err", e); }
+  }
+
+  // user started speaking
+  vad.on("speech_start", () => {
+    session.turn.id++;
+    const newTurnId = session.turn.id;
+    console.log(`[Turn ${newTurnId}] Speech Start`);
+
+    // reset everything for new turn
+    resetTurn(session, ws);
     
-    ws.send(JSON.stringify({ type: "speech_start" }));
+    ws.send(JSON.stringify({ type: "turn_reset", turnId: newTurnId }));
     
-    // Reset counters
-    session.finalTranscript = "";
+    // make sure stt is connected
+    if (!session.deepgramReady) {
+        console.log("STT was dead, reviving...");
+        setupDeepgram(session);
+    }
+    
+    session.turn.active = true;
     session.metrics.sttStart = Date.now();
 
-    // Send the little bit of audio we missed while detecting silence
+    // handle backlog
     const backlog = [...session.backlog];
     session.backlog = [];
-    
-    if (session.deepgramReady) {
-      backlog.forEach(frame => session.deepgramStream.send(frame));
+    if (session.deepgramReady && session.deepgramStream) {
+        backlog.forEach(f => session.deepgramStream.send(f));
     }
   });
 
+  // user stopped speaking
   vad.on("speech_stop", async () => {
-    console.log("Silence detected (speech finished)");
-    ws.send(JSON.stringify({ type: "speech_stop" }));
+    console.log("Detected Silence");
+    ws.send(JSON.stringify({ type: "speech_stop", turnId: session.turn.id }));
+    
+    const currentTurnId = session.turn.id;
 
-    await handleTurn(session, ws, session.turn.id);
+    // wait a bit if we haven't received text yet
+    const hasText = (session.finalTranscript + session.currentTranscript).trim().length > 0;
+    
+    if (!hasText) {
+        console.log("No text yet, waiting for STT...");
+        await new Promise(r => setTimeout(r, 1000));
+        
+        // check again
+        const finalCheck = (session.finalTranscript + session.currentTranscript).trim().length > 0;
+        if (!finalCheck) {
+             console.log("Still no text. Resetting turn to prevent zombie state.");
+             resetTurn(session, ws);
+             return;
+         }
+    }
+    
+    // process the turn using the captured id
+    await handleTurn(session, ws, currentTurnId);
   });
 
-
-  // Handle messages from frontend
   ws.on("message", (data) => {
     try {
-      const msg = JSON.parse(data.toString());
-      if (msg.type === "tts_kill") {
-        console.log("User manually stopped AI");
-        if (session.turn.active) session.turn.active = false;
-        session.tts.status = "paused";
-        return;
-      }
-    } catch(e) {
-      // It's binary audio data
-    }
+        const msg = JSON.parse(data.toString());
+        if (msg.type === "tts_kill") {
+            console.log("Manual Stop");
+            resetTurn(session, ws);
+            return;
+        }
+    } catch(e) {}
 
-    // Add new audio to our buffer
+    // audio buffer handling
     session.audioBuffer = Buffer.concat([session.audioBuffer, Buffer.from(data)]);
+    while(session.audioBuffer.length >= FRAME_SIZE) {
+        const frame = session.audioBuffer.slice(0, FRAME_SIZE);
+        session.audioBuffer = session.audioBuffer.slice(FRAME_SIZE);
+        
+        session.backlog.push(frame);
+        if(session.backlog.length > 50) session.backlog.shift();
 
-    // Process in 20ms chunks
-    while (session.audioBuffer.length >= FRAME_SIZE) {
-      const frame = session.audioBuffer.slice(0, FRAME_SIZE);
-      session.audioBuffer = session.audioBuffer.slice(FRAME_SIZE);
-
-      // Save for backlog
-      session.backlog.push(frame);
-      if (session.backlog.length > 50) session.backlog.shift(); // keep 1s
-
-      // Run VAD
-      session.vad.process(frame);
-
-      // If we are talking, stream to Deepgram
-      if (session.vad.state === "SPEAKING" && session.deepgramReady) {
-        session.deepgramStream.send(frame);
-      }
+        session.vad.process(frame);
+        if (session.vad.state === "SPEAKING" && session.deepgramReady) {
+            session.deepgramStream.send(frame);
+        }
     }
   });
 
   ws.on("close", () => {
-    console.log("Client disconnected");
-    if (session.deepgramStream) {
-      session.deepgramStream.finish();
-    }
+    console.log("Disconnected");
+    if(session.deepgramStream) session.deepgramStream.finish();
+    if(session.resumeTimer) clearTimeout(session.resumeTimer);
   });
 });
