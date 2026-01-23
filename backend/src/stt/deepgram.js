@@ -16,6 +16,7 @@ function createDeepgramStream() {
     channels: 1, 
     interim_results: true,
     punctuate: true,
+    keywords: ["Galentine's Day:2", "Galentine:2", "Pune:2", "Industrial:1"], // Boost common/rare terms
   });
 }
 
