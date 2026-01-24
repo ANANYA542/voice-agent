@@ -14,15 +14,12 @@
 
     body {
       font-family: 'Courier New', Courier, monospace;
-      /* looks cool */
       background-color: #0a0a0a;
-
       color: #e0e0e0;
       height: 100vh;
       overflow: hidden;
       display: grid;
       grid-template-columns: 280px 1fr 300px;
-      /* grid layout */
       border-top: 2px solid #000;
     }
 
@@ -68,7 +65,6 @@
     .transcript-box {
       flex: 1;
       height: 100%;
-      /* Force height */
       overflow-y: auto;
       padding: 20px;
       font-size: 13px;
@@ -78,20 +74,16 @@
       scroll-behavior: smooth;
     }
 
-    /* ... */
-
     /* center stage */
     .col-stage {
       position: relative;
       height: 100vh;
-      /* Fixed height to prevent jumping */
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       background: radial-gradient(circle at center, #1a1a1a 0%, #0a0a0a 70%);
       overflow: hidden;
-      /* No scroll bars on stage */
     }
 
     .system-status {
@@ -113,7 +105,6 @@
       color: #444;
     }
 
-    /* the big circle thing */
     .circle-viz {
       width: 250px;
       height: 250px;
@@ -126,7 +117,6 @@
       transition: all 0.3s ease;
     }
 
-    /* Inner circles */
     .circle-viz::before {
       content: '';
       position: absolute;
@@ -183,18 +173,17 @@
       color: #fff;
     }
 
-    .visualizer-circle.thinking {
-      background: #f59e0b;
-      /* Amber */
-      transform: scale(1.1);
-      box-shadow: 0 0 40px rgba(245, 158, 11, 0.4);
-      animation: pulse 1.5s infinite;
+    .col-stage.thinking .circle-viz {
+      border-color: var(--orange);
+      box-shadow: 0 0 30px rgba(255, 145, 0, 0.2);
     }
 
-    /* SEARCHING STATE */
+    .col-stage.thinking .mic-icon {
+      color: var(--orange);
+    }
+
     .col-stage.searching .circle-viz {
       border-color: #a855f7;
-      /* Purple */
       box-shadow: 0 0 30px rgba(168, 85, 247, 0.2);
     }
 
@@ -205,7 +194,6 @@
     .col-stage.searching .circle-viz::after {
       animation: pulseSearch 1.0s infinite;
       background: #2e1065;
-      /* Dark Purple */
     }
 
     @keyframes pulseSearch {
@@ -305,7 +293,6 @@
       }
     }
 
-
     /* metrics sidebar */
     .col-observe {
       border-left: 1px solid var(--border);
@@ -314,7 +301,6 @@
       flex-direction: column;
       padding: 0;
       height: 100vh;
-      /* IMPORTANT: Pin to full height */
     }
 
     .obs-section {
@@ -330,66 +316,30 @@
       text-transform: uppercase;
     }
 
-    .metric-row {
+    .metric-item {
       margin-bottom: 15px;
     }
 
-    .m-label {
-      display: flex;
-      justify-content: space-between;
+    .m-key {
       font-size: 10px;
       color: #888;
-      margin-bottom: 5px;
+      display: block;
+      margin-bottom: 4px;
     }
 
     .m-val {
+      font-size: 12px;
       color: var(--cyan);
       font-weight: bold;
     }
 
-    .progress-track {
-      width: 100%;
-      height: 2px;
-      background: #222;
-      position: relative;
+    .metric-sub {
+      font-size: 10px;
+      color: #555;
+      margin-top: -10px;
+      margin-bottom: 15px;
     }
 
-    .progress-bar {
-      height: 100%;
-      background: #444;
-      width: 0%;
-      transition: width 0.3s;
-      position: relative;
-    }
-
-    .progress-bar::after {
-      content: '';
-      position: absolute;
-      right: 0;
-      top: -1px;
-      width: 4px;
-      height: 4px;
-      border-radius: 50%;
-      background: inherit;
-    }
-
-    .bar-vad {
-      background: var(--green);
-    }
-
-    .bar-stt {
-      background: var(--cyan);
-    }
-
-    .bar-llm {
-      background: var(--orange);
-    }
-
-    .bar-tts {
-      background: var(--red);
-    }
-
-    /* Cards Grid */
     .cards-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -475,9 +425,7 @@
       <span>Live Transcript</span>
       <div class="live-dot"></div>
     </div>
-    <div class="transcript-box" id="transcript">
-      <!-- js will enable this -->
-    </div>
+    <div class="transcript-box" id="transcript"></div>
   </div>
 
   <!-- 2. CENTER STAGE COL -->
@@ -506,8 +454,19 @@
     </div>
     <br><br>
 
+    <div style="margin-top:20px; border-top:1px solid #333; padding-top:10px; width: 250px;">
+      <details>
+        <summary style="cursor:pointer; font-size:12px; color:#888;">Debug: System Context</summary>
+        <div style="margin-top:10px; display:flex; gap:10px;">
+          <input type="text" id="sysContext" placeholder="New System Prompt..."
+            style="flex:1; padding:8px; border-radius:4px; border:none; background:#222; color:#fff;" />
+          <button onclick="updateContext()" style="padding:8px; font-size:12px;">Update</button>
+        </div>
+      </details>
+    </div>
+
     <button id="stop-btn" onclick="stopAI()"
-      style="background:transparent; border:1px solid #555; color:#555; padding:5px 10px; cursor:pointer; font-size:10px;">STOP
+      style="background:transparent; border:1px solid #555; color:#555; padding:5px 10px; cursor:pointer; font-size:10px; margin-top:20px;">STOP
       OUTPUT</button>
   </div>
 
@@ -517,8 +476,6 @@
 
     <div class="obs-section">
       <div class="obs-title">Conversation Turn</div>
-
-      <!-- List style metrics -->
       <div class="metric-list">
 
         <div class="metric-item">
@@ -556,7 +513,7 @@
       <div class="cards-grid">
         <div class="stat-card">
           <div class="stat-label">Noise Floor</div>
-          <div class="stat-val">-45dB</div> <!-- static for now -->
+          <div class="stat-val">-45dB</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">Stability</div>
@@ -576,7 +533,7 @@
 
   <script src="audioPlayer.js"></script>
   <script>
-    const player = new WavQueuePlayer(); // Strict Queue Player
+    const player = new WavQueuePlayer();
     let ws;
     let activeTurnId = 0;
 
@@ -596,8 +553,6 @@
             autoGainControl: true
           }
         });
-
-        // Force 16kHz for backend compatibility
         const audioContext = new AudioContext({ sampleRate: 16000 });
         const source = audioContext.createMediaStreamSource(stream);
         const processor = audioContext.createScriptProcessor(4096, 1, 1);
@@ -607,19 +562,14 @@
 
         processor.onaudioprocess = (e) => {
           if (!ws || ws.readyState !== WebSocket.OPEN) return;
-
           const inputData = e.inputBuffer.getChannelData(0);
           const pcmData = new Int16Array(inputData.length);
-
-          // Convert float32 to int16
           for (let i = 0; i < inputData.length; i++) {
             let s = Math.max(-1, Math.min(1, inputData[i]));
             pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
           }
-
           ws.send(pcmData.buffer);
         };
-
         console.log("Mic initialized at 16kHz");
       } catch (e) {
         console.error("Mic Error", e);
@@ -633,25 +583,31 @@
       location.reload();
     }
 
-    // ...
-
     function stopAI() {
       if (ws && ws.readyState === 1) {
-        ws.send(JSON.stringify({ type: "tts_kill" }));
+        ws.send(JSON.stringify({ type: "user_stop" }));
         player.clear();
       }
     }
 
-    // ...
-
     function connect() {
       ws = new WebSocket("ws://localhost:3001");
 
-      // ... onopen/onclose unchanged ...
+      ws.onopen = () => {
+        console.log("Connected to Backend");
+        setUIState('active');
+      };
+
+      ws.onclose = () => {
+        console.log("Disconnected");
+        document.getElementById('status-text').innerText = "DISCONNECTED";
+        document.getElementById('status-dot').style.background = "red";
+      };
 
       ws.onmessage = (event) => {
         const msg = JSON.parse(event.data);
 
+        // --- AUDIO/LEGACY ---
         if (msg.type === 'turn_reset') {
           const newId = msg.turnId;
           if (newId > activeTurnId) {
@@ -660,153 +616,136 @@
             player.clear();
             setUIState('active');
           }
-          return;
         }
-
-        if (msg.turnId && msg.turnId !== activeTurnId) {
-          console.warn(`Ignored ghost msg type=${msg.type} id=${msg.turnId}`);
-          return;
-        }
-
-        if (msg.type === 'tts_start') {
+        else if (msg.type === 'tts_start') {
           player.setTtsId(msg.ttsId);
           setUIState('speaking');
         }
         else if (msg.type === 'tts_audio_full') {
-          // New Buffered WAV Event
           player.enqueue(msg.payload.audio, msg.ttsId);
         }
         else if (msg.type === 'tts_end') { /* done */ }
         else if (msg.type === 'tts_kill') { player.clear(); setUIState('listening'); }
 
-        // ... transcripts ...
-        else if (msg.type === 'user_transcript') addChat('USER', msg.text);
-        else if (msg.type === 'ai_text_chunk') {
-            // If the last chat was assistant, append.
-            const container = document.getElementById('chat-container');
-            const lastMsg = container.lastElementChild;
-            
-            if (lastMsg && lastMsg.classList.contains('assistant-message')) {
-                // Append to existing
-                lastMsg.textContent += msg.text;
-            } else {
-                // Create new
-                const div = document.createElement('div');
-                div.className = "p-4 rounded-2xl max-w-[80%] bg-white/10 text-white assistant-message"; // Add class for tracking
-                div.textContent = msg.text;
-                container.appendChild(div);
-            }
-            container.scrollTop = container.scrollHeight;
+        // --- FEATURE 1: LIVE TRANSCRIPT ---
+        else if (msg.type === 'transcript_update') {
+          renderTranscriptEntry(msg.payload);
         }
-        // ...
 
-        // ... other states ...
+        // --- STATES ---
         else if (msg.type === 'state_searching') setUIState('searching');
         else if (msg.type === 'state_thinking') setUIState('thinking');
         else if (msg.type === 'state_listening') setUIState('listening');
         else if (msg.type === 'metrics_update') updateDashboard(msg);
       };
-
-      // ... setUIState unchanged ...
     }
+
+    // --- UI HELPERS ---
 
     function setUIState(state) {
-      const mic = document.getElementById('stage'); // using stage for classes
-      const visualizer = document.querySelector('.circle-viz');
+      const stage = document.getElementById('stage');
+      const statusText = document.getElementById('status-text');
       const hint = document.getElementById('ai-hint');
-      const stopBtn = document.getElementById('stop-btn');
+      const dot = document.getElementById('status-dot');
 
-      // clean up classes
-      mic.classList.remove('active', 'listening', 'speaking', 'thinking', 'searching');
-      visualizer.classList.remove('speaking', 'thinking', 'searching');
-      stopBtn.style.display = 'none';
+      stage.classList.remove('listening', 'thinking', 'speaking', 'searching', 'active');
+      dot.style.background = '#333';
+      dot.style.boxShadow = 'none';
 
-      if (state === 'listening') {
-        mic.classList.add('listening');
-        hint.textContent = "Listening...";
-        hint.style.color = "#666";
-      }
-      else if (state === 'active') {
-        mic.classList.add('active');
-        hint.textContent = "Processing...";
-        hint.style.color = "#fff";
-      }
-      else if (state === 'searching') {
-        mic.classList.add('searching');
-        visualizer.classList.add('searching');
-        hint.textContent = "Searching Web...";
-        hint.style.color = "#a855f7"; // Purple
-      }
-      else if (state === 'thinking') {
-        mic.classList.add('thinking');
-        visualizer.classList.add('thinking');
-        hint.textContent = "Thinking...";
-        hint.style.color = "var(--orange)";
-      }
-      else if (state === 'speaking') {
-        mic.classList.add('speaking');
-        visualizer.classList.add('speaking');
-        hint.textContent = "Speaking...";
-        hint.style.color = "var(--cyan)";
-        stopBtn.style.display = 'block';
+      switch (state) {
+        case 'listening':
+          stage.classList.add('listening');
+          statusText.innerText = "LISTENING";
+          statusText.style.color = "var(--cyan)";
+          hint.innerText = "Listening for your voice...";
+          dot.style.background = "var(--cyan)";
+          dot.style.boxShadow = "0 0 10px var(--cyan)";
+          break;
+
+        case 'thinking':
+          stage.classList.add('thinking');
+          statusText.innerText = "PROCESSING";
+          statusText.style.color = "var(--orange)";
+          hint.innerText = "Thinking...";
+          dot.style.background = "var(--orange)";
+          break;
+
+        case 'searching':
+          stage.classList.add('searching');
+          statusText.innerText = "SEARCHING WEB";
+          statusText.style.color = "#a855f7";
+          hint.innerText = "Consulting the global knowledge base...";
+          dot.style.background = "#a855f7";
+          break;
+
+        case 'speaking':
+          stage.classList.add('speaking');
+          statusText.innerText = "SPEAKING";
+          statusText.style.color = "var(--green)";
+          hint.innerText = "Responding...";
+          dot.style.background = "var(--green)";
+          break;
+
+        default:
+          stage.classList.add('active');
+          statusText.innerText = "SYSTEM ACTIVE";
+          statusText.style.color = "#fff";
+          hint.innerText = "Ready.";
+          dot.style.background = "#fff";
+          break;
       }
     }
 
-
-    function addChat(role, text) {
+    function renderTranscriptEntry(entry) {
       const box = document.getElementById('transcript');
-      const now = new Date().toLocaleTimeString('en-US', { hour12: false });
+      const timeStr = new Date(entry.timestamp).toLocaleTimeString('en-US', { hour12: false });
 
-      const group = document.createElement('div');
-      group.className = 'msg-group';
+      const div = document.createElement('div');
+      div.className = `msg-group ${entry.role}`;
+      div.style.marginBottom = "15px";
+      div.style.padding = "12px";
+      div.style.borderRadius = "4px";
+      div.style.background = entry.role === 'user' ? 'rgba(255,255,255,0.05)' : 'rgba(0,188,212,0.1)';
+      div.style.borderLeft = entry.role === 'user' ? '3px solid #666' : '3px solid var(--cyan)';
+      div.style.animation = "fadeIn 0.3s ease";
 
-      group.innerHTML = `
-            <div class="msg-meta">
-               <span>${now}</span> 
-               <span class="msg-role ${role.toLowerCase()}">${role}</span>
+      div.innerHTML = `
+            <div style="font-size:9px; opacity:0.5; margin-bottom:6px; letter-spacing:1px; display:flex; justify-content:space-between;">
+               <span>${entry.role.toUpperCase()}</span>
+               <span>${timeStr}</span>
             </div>
-            <div class="msg-content ${role.toLowerCase()}">
-                ${text}
+            <div style="font-size:14px; line-height:1.5; color:#eee;">
+                ${entry.text}
             </div>
         `;
-
-      box.appendChild(group);
+      box.appendChild(div);
       box.scrollTop = box.scrollHeight;
     }
 
-    // Updates the last assistant message or creates new one
-    function updateAssistantChat(chunk) {
-      const box = document.getElementById('transcript');
-      const lastGroup = box.lastElementChild;
-
-      // check if last message is assistant
-      if (lastGroup && lastGroup.querySelector('.msg-role.assistant')) {
-        const contentDiv = lastGroup.querySelector('.msg-content');
-        contentDiv.innerHTML += chunk; // append text
-        box.scrollTop = box.scrollHeight;
-      } else {
-        // create new
-        addChat('ASSISTANT', chunk);
-      }
-    }
-
     function updateDashboard(data) {
-      document.getElementById('m-stt').innerText = data.stt + "ms";
-      document.getElementById('m-llm').innerText = data.llm + "ms";
+      if (data.stt) document.getElementById('m-stt').innerText = data.stt + "ms";
+      if (data.llm) document.getElementById('m-llm').innerText = data.llm + "ms";
 
       const ttft = data.ttft ? data.ttft + "ms" : "--";
       document.getElementById('m-ttft').innerText = "TTFT: " + ttft;
 
-      document.getElementById('m-tts').innerText = "500ms"; // avg proxy for now
       document.getElementById('m-total').innerText = data.e2e + "ms";
 
       const now = new Date();
       const timeString = now.getHours() + ":" + now.getMinutes() + ":" + now.getSeconds();
       document.getElementById('m-vad').innerText = timeString;
-
       document.getElementById('m-turn').innerText = data.turnId;
     }
 
+    function updateContext() {
+      const input = document.getElementById('sysContext');
+      const text = input ? input.value.trim() : "";
+      if (text && ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: "context_update", context: text }));
+        if (input) input.value = "";
+        alert("Context Updated!");
+      }
+    }
   </script>
 </body>
 
