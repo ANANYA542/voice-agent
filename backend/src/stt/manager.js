@@ -14,7 +14,7 @@ class STTManager extends EventEmitter {
     }
 
     _initProvider(name) {
-        // Cleanup existing
+       
         if (this.activeProvider) {
             this.activeProvider.stop();
             this.activeProvider.removeAllListeners();
@@ -25,14 +25,13 @@ class STTManager extends EventEmitter {
         if (name === "deepgram") {
             this.activeProvider = new DeepgramProvider();
         } else if (name === "assemblyai") {
-            // Placeholder: "Architecture supports fallback"
-            // throw new Error("Fallback provider 'assemblyai' not enabled");
+            
             console.error(`[STT Manager] Fallback provider '${name}' requested but not implemented.`);
             this.emit("error_critical", new Error(`Provider ${name} not implemented`));
             return;
         }
 
-        // --- Event Wiring ---
+  
         
         this.activeProvider.on("open", () => {
             console.log(`[STT Manager] ${name} Connected`);

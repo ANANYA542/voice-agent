@@ -1,15 +1,16 @@
 const STTProvider = require("./base");
-const { createDeepgramStream } = require("../deepgram");
+const { createClient } = require("@deepgram/sdk");
 
 class DeepgramProvider extends STTProvider {
     constructor() {
         super("deepgram");
         this.stream = null;
+        this.apiKey = process.env.DEEPGRAM_API_KEY;
     }
 
     start() {
         try {
-            this.stream = createDeepgramStream();
+            this.stream = this._createStream();
             
             if (!this.stream) {
                  this.emit("error", new Error("Deepgram stream creation failed (check API Key)"));
@@ -33,6 +34,21 @@ class DeepgramProvider extends STTProvider {
         } catch (e) {
             this.emit("error", e);
         }
+    }
+
+    _createStream() {
+        const deepgram = createClient(this.apiKey);
+        return deepgram.listen.live({
+            model: "nova-2",
+            language: "en",
+            smart_format: true,
+            encoding: "linear16",
+            sample_rate: 16000,
+            channels: 1, 
+            interim_results: true,
+            punctuate: true,
+            keywords: ["Galentine's Day:2", "Galentine:2", "Pune:2", "Industrial:1"], 
+        });
     }
 
     sendAudio(buffer) {
