@@ -4,7 +4,6 @@ const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
 });
 
-// Returns an Async Iterator of tokens
 async function* streamGroq(messages) {
   const start = Date.now();
   let firstToken = true;
@@ -14,7 +13,7 @@ async function* streamGroq(messages) {
       model: "llama-3.1-8b-instant",
       messages: messages,
       temperature: 0.3,
-      stream: true, // Enable streaming
+      stream: true,
     });
 
     for await (const chunk of stream) {
@@ -33,7 +32,7 @@ async function* streamGroq(messages) {
   }
 }
 
-// Check if query needs search
+
 async function classifyIntent(query) {
     try {
         const completion = await groq.chat.completions.create({
@@ -49,7 +48,7 @@ async function classifyIntent(query) {
         return res === "true";
     } catch(e) {
         console.error("Intent Classification Failed:", e);
-        return false; // Fail safe to no search
+        return false; 
     }
 }
 

@@ -1,5 +1,3 @@
-// Node 18+ has global fetch, but we'll specificially use the installed node-fetch via dynamic import
-// to support module loading in CJS environment.
 let fetch; 
 
 async function searchWeb(query) {
@@ -9,8 +7,7 @@ async function searchWeb(query) {
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 1500); // 1.5s Timeout (more realistic)
-
+  const timeoutId = setTimeout(() => controller.abort(), 1500); 
   try {
     const res = await fetch("https://api.tavily.com/search", {
       method: "POST",
@@ -38,7 +35,7 @@ async function searchWeb(query) {
 }
 
 function needsSearch(text) {
-  // Simple keyword heuristic
+  
   const keywords = [
       "weather", "today", "latest", "news", "price", "score", 
       "who won", "current", "now", "population", "capital", 
