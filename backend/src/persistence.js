@@ -3,7 +3,7 @@ const path = require("path");
 
 function saveSession(session) {
     if (!session.transcript || session.transcript.length === 0) {
-        return; // Nothing to save
+        return; 
     }
 
     const sessionDir = path.join(__dirname, "../sessions");
