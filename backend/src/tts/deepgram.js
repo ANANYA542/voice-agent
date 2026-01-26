@@ -2,7 +2,7 @@ const { createClient } = require("@deepgram/sdk");
 
 const deepgram = createClient(process.env.DEEPGRAM_API_KEY);
 
-// stream audio from text
+
 async function streamTextToSpeech(text) {
   if (!text) throw new Error("No text provided");
 
@@ -12,7 +12,7 @@ async function streamTextToSpeech(text) {
       model: "aura-asteria-en",
       encoding: "linear16",
       sample_rate: 16000,
-      container: "none", // raw audio
+      container: "none", 
     }
   );
 
@@ -22,7 +22,6 @@ async function streamTextToSpeech(text) {
   return stream;
 }
 
-// generate regular wav buffer (non-streaming)
 async function generateAudio(text) {
   const response = await deepgram.speak.request(
     { text },
@@ -30,7 +29,7 @@ async function generateAudio(text) {
       model: "aura-asteria-en",
       encoding: "linear16",
       sample_rate: 16000,
-      container: "wav", // We want a valid WAV file with headers
+      container: "wav",
     }
   );
 
