@@ -6,14 +6,15 @@ const { streamTextToSpeech, generateAudio } = require("./tts/deepgram");
 const { streamGroq, classifyIntent } = require("./llm/groq");
 const { searchWeb } = require("./search");
 const { saveSession } = require("./persistence");
+const redis = require("./redis");
 
 const PORT = 3001;
-const FRAME_SIZE = 640; // 20ms audio frame
+const FRAME_SIZE = 640;
 
 const wss = new WebSocket.Server({ port: PORT });
 console.log(`Server started on port ${PORT}`);
 
-// --- HELPERS ---
+// --- HELPER FUNCTIONS ---
 
 function log(session, event, data = {}) {
   console.log(JSON.stringify({
@@ -27,15 +28,16 @@ function log(session, event, data = {}) {
 }
 
 function cleanHistory(history) {
+  
   return history.filter(m => m.content && m.content.length > 0);
 }
 
-// remove weird characters so TTS doesn't say them
+
 function sanitizeForTTS(text) {
   return text
-    .replace(/[*#`_~>\[\]\(\)-]/g, "") // Remove markdown chars
-    .replace(/\s+/g, " ") // Collapse whitespace
-    .replace(/[^\w\s.,?!']/g, "") // Remove anything not alphanumeric or basic punctuation
+    .replace(/[*#`_~>\[\]\(\)-]/g, "") 
+    .replace(/\s+/g, " ") 
+    .replace(/[^\w\s.,?!']/g, "")
     .trim();
 }
 
@@ -44,7 +46,7 @@ function sanitizeForTTS(text) {
 async function handleTurn(session, ws, turnId) {
   if (turnId !== session.turn.id) return;
 
-  // 1. Combine Transcript
+
   let userText = (session.finalTranscript + " " + (session.currentTranscript || "")).trim();
   session.finalTranscript = ""; 
   session.currentTranscript = "";
@@ -58,7 +60,7 @@ async function handleTurn(session, ws, turnId) {
   session.metrics.turnCount++;
   session.history.push({ role: "user", content: userText });
   
-  // LIVE TRANSCRIPT: USER (Feature 1)
+
   const userEntry = {
       role: "user",
       text: userText,
@@ -67,23 +69,13 @@ async function handleTurn(session, ws, turnId) {
   };
   session.transcript.push(userEntry);
   ws.send(JSON.stringify({ type: "transcript_update", payload: userEntry }));
+  
+  // Save state asynchronously (Fire & Forget)
+  // We use Redis here so if the server restarts, the conversation isn't lost.
+  redis.saveSession(session.id, session); 
 
-  // 1a. Ambiguity Check (Sales vs Cells)
-  const lowerText = userText.toLowerCase();
-  if (lowerText.includes("sales") || lowerText.includes("cells") || lowerText.includes("sails")) {
-       log(session, "stt_ambiguity_detected", { text: lowerText });
-       const clarification = "Just to confirm, did you mean cells as in biology, or sales as in business?";
-       session.history.push({ role: "assistant", content: clarification });
-       await processAndSendSentence(session, ws, turnId, clarification, 0);
-       
-       ws.send(JSON.stringify({ type: "tts_end", turnId })); 
-       session.tts.status = "idle";
-       session.state = "IDLE";
-       session.vad.setMode("listening");
-       return;
-  }
 
-  // 2. Web Search Check (Feature 4 - Isolated & Safe)
+
   let searchContext = "";
   ws.send(JSON.stringify({ type: "state_thinking", turnId })); 
   
@@ -111,6 +103,7 @@ async function handleTurn(session, ws, turnId) {
           ws.send(JSON.stringify({ type: "state_thinking", turnId })); 
       }
   } catch (searchErr) {
+      // If search fails, log it but don't crash. Just continue with what we have.
       log(session, "intent_error", { error: searchErr.message });
   }
   
@@ -170,7 +163,7 @@ async function handleTurn(session, ws, turnId) {
 
       session.history.push({ role: "assistant", content: fullResponse });
       
-      // LIVE TRANSCRIPT: ASSISTANT (Feature 1)
+     
       const aiEntry = {
           role: "assistant",
           text: fullResponse,
@@ -179,6 +172,9 @@ async function handleTurn(session, ws, turnId) {
       };
       session.transcript.push(aiEntry);
       ws.send(JSON.stringify({ type: "transcript_update", payload: aiEntry }));
+      
+      // Save again after AI turn completes
+      redis.saveSession(session.id, session);
       
       ws.send(JSON.stringify({ type: "tts_end", turnId }));
       log(session, "turn_end", { totalLatency: Date.now() - session.metrics.sttStart });
@@ -219,7 +215,7 @@ async function processAndSendSentence(session, ws, turnId, text, index) {
         session.tts.status = "playing";
         ws.send(JSON.stringify({ type: "tts_start", turnId, ttsId: session.tts.id }));
         
-        // MIC DEAF PERIOD (200ms)
+  
         session.ignoreMicUntil = Date.now() + 200; 
         session.vad.setMode("speaking");
     }
@@ -249,19 +245,22 @@ async function processAndSendSentence(session, ws, turnId, text, index) {
 
 // --- CONNECTION HANDLER ---
 
-wss.on("connection", (ws) => {
-  const sessionId = Math.random().toString(36).substring(7);
+wss.on("connection", async (ws, req) => {
+
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const clientSessionId = url.searchParams.get("sessionId");
   
   const session = {
-    id: sessionId,
+    id: clientSessionId || Math.random().toString(36).substring(7),
     history: [],
-    transcript: [], // Feature 1: Live Storage
+    transcript: [], 
     audioBuffer: Buffer.alloc(0),
     backlog: [],
     
     state: "IDLE", 
-    deepgramStream: null,
-    deepgramReady: false,
+  
+    stt: null,
+    
     finalTranscript: "",
     currentTranscript: "",
     ignoreMicUntil: 0,
@@ -277,9 +276,31 @@ wss.on("connection", (ws) => {
     lastAgentText: "",
 
     context: "You are a helpful, concise voice assistant.",
-    metrics: { turnCount: 0, sttStart: 0 }
+    metrics: { turnCount: 0, sttStart: 0 },
+    bargeInFrames: 0
   };
   
+  console.log(`[Session ${session.id}] Connected`);
+
+  // Attempt to restore previous session from Redis
+  // This helps when a user refreshes the page or reconnects.
+  if (clientSessionId) {
+      const restored = await redis.loadSession(clientSessionId);
+      if (restored) {
+          console.log(`[Session ${session.id}] Restored from Redis (${restored.transcript.length} msgs)`);
+          session.transcript = restored.transcript;
+      
+          if (restored.context && restored.context.length > 10) {
+             session.context = restored.context;
+          }
+          
+          // Replay transcript so the UI populates immediately
+          session.transcript.forEach(entry => {
+              ws.send(JSON.stringify({ type: 'transcript_update', payload: entry }));
+          });
+      }
+  }
+
   log(session, "session_start");
 
   function resetTurn(session, ws) {
@@ -423,6 +444,8 @@ wss.on("connection", (ws) => {
             if (msg.context && typeof msg.context === "string") {
                 session.context = msg.context;
                 log(session, "context_updated", { new_context_preview: session.context.substring(0, 50) });
+            
+                redis.saveSession(session.id, session);
             }
             return;
         }
@@ -436,7 +459,7 @@ wss.on("connection", (ws) => {
         const frame = session.audioBuffer.slice(0, FRAME_SIZE);
         session.audioBuffer = session.audioBuffer.slice(FRAME_SIZE);
         
-        // MIC DEAF CHECK
+
         if (session.ignoreMicUntil && Date.now() < session.ignoreMicUntil) {
             if (session.stt) session.stt.sendAudio(frame);
             continue; 
