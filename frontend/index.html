@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <title>Voice Agent - Interface</title>
   <style>
-    /* basic setup */
+    
     * {
       box-sizing: border-box;
       margin: 0;
@@ -23,7 +23,7 @@
       border-top: 2px solid #000;
     }
 
-    /* colors */
+
     :root {
       --cyan: #00bcd4;
       --green: #00e676;
@@ -34,12 +34,14 @@
       --border: #333;
     }
 
-    /* container logic */
+
     .col-transcript {
       border-right: 1px solid var(--border);
       display: flex;
       flex-direction: column;
       background: #0f0f0f;
+      height: 100vh;
+      overflow: hidden;
     }
 
     .col-header {
@@ -64,7 +66,7 @@
 
     .transcript-box {
       flex: 1;
-      height: 100%;
+      min-height: 0;
       overflow-y: auto;
       padding: 20px;
       font-size: 13px;
@@ -557,7 +559,28 @@
         const source = audioContext.createMediaStreamSource(stream);
         const processor = audioContext.createScriptProcessor(4096, 1, 1);
 
-        source.connect(processor);
+        // CLIENT-SIDE AUDIO PROCESSING
+        // We chain a HighPass filter and Compressor *before* sending audio to the backend.
+        // This removes low-frequency rumble (fans, AC) that typically causes false VAD triggers.
+        // It's a simple, zero-latency way to "clean" the signal without heavy AI models on the client.
+
+        // 1. HighPass Filter (150Hz) - Cuts the "hum"
+        const highpass = audioContext.createBiquadFilter();
+        highpass.type = 'highpass';
+        highpass.frequency.value = 150;
+
+        // 2. Compressor - Balances volume levels
+        const compressor = audioContext.createDynamicsCompressor();
+        compressor.threshold.value = -50;
+        compressor.knee.value = 40;
+        compressor.ratio.value = 12;
+        compressor.attack.value = 0;
+        compressor.release.value = 0.25;
+
+        // Chain: Mic -> HighPass -> Compressor -> Processor -> Destination
+        source.connect(highpass);
+        highpass.connect(compressor);
+        compressor.connect(processor);
         processor.connect(audioContext.destination);
 
         processor.onaudioprocess = (e) => {
@@ -591,15 +614,24 @@
     }
 
     function connect() {
-      ws = new WebSocket("ws://localhost:3001");
+      // Session Persistence logic
+      let ssid = localStorage.getItem("voice_session_id");
+      if (!ssid) {
+        ssid = Math.random().toString(36).substring(2) + Date.now().toString(36);
+        localStorage.setItem("voice_session_id", ssid);
+      }
+
+      console.log("Connecting with Session ID:", ssid);
+      ws = new WebSocket(`ws://localhost:3001?sessionId=${ssid}`);
 
       ws.onopen = () => {
-        console.log("Connected to Backend");
+        // Initialize Connection
+        console.log("Connecting to Backend...");
         setUIState('active');
       };
 
       ws.onclose = () => {
-        console.log("Disconnected");
+        console.log("Disconnected from Backend");
         document.getElementById('status-text').innerText = "DISCONNECTED";
         document.getElementById('status-dot').style.background = "red";
       };
@@ -607,7 +639,7 @@
       ws.onmessage = (event) => {
         const msg = JSON.parse(event.data);
 
-        // --- AUDIO/LEGACY ---
+        // --- AUDIO PLAYBACK ---
         if (msg.type === 'turn_reset') {
           const newId = msg.turnId;
           if (newId > activeTurnId) {
@@ -627,12 +659,12 @@
         else if (msg.type === 'tts_end') { /* done */ }
         else if (msg.type === 'tts_kill') { player.clear(); setUIState('listening'); }
 
-        // --- FEATURE 1: LIVE TRANSCRIPT ---
+        // --- LIVE TRANSCRIPT ---
         else if (msg.type === 'transcript_update') {
           renderTranscriptEntry(msg.payload);
         }
 
-        // --- STATES ---
+        // --- UI STATE UPDATES ---
         else if (msg.type === 'state_searching') setUIState('searching');
         else if (msg.type === 'state_thinking') setUIState('thinking');
         else if (msg.type === 'state_listening') setUIState('listening');
