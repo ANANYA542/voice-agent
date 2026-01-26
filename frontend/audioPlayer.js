@@ -20,7 +20,7 @@ class WavQueuePlayer {
         }
     }
 
-    // New format: We receive full WAV file (base64)
+  
     async enqueue(base64Wav, ttsId) {
         if (ttsId !== this.activeTtsId) return;
         this.init();
@@ -34,7 +34,7 @@ class WavQueuePlayer {
                 bytes[i] = binaryString.charCodeAt(i);
             }
 
-            // Decode Audio Data (WAV header handling is automatic here)
+            
             const audioBuffer = await this.ctx.decodeAudioData(bytes.buffer);
             
             this.queue.push(audioBuffer);
@@ -59,7 +59,7 @@ class WavQueuePlayer {
         source.onended = () => {
              this.isPlaying = false;
              this.currentSource = null;
-             this.tryPlayMsg(); // Play next
+             this.tryPlayMsg(); 
         };
         
         source.start(0);
@@ -68,9 +68,7 @@ class WavQueuePlayer {
     clear() {
         this.queue = [];
         this.isPlaying = false;
-        // Note: We can't easily stop the currently playing 'decodeAudioData' source 
-        // without tracking the reference. 
-        // Improvement: Track 'currentSource'
+       
         if (this.currentSource) {
             try { this.currentSource.stop(); } catch(e){}
             this.currentSource = null;

@@ -6,21 +6,20 @@ class VAD extends EventEmitter {
 
     this.sampleRate = options.sampleRate || 16000;
     this.energyThreshold = 500;
-    this.speechThreshold = 500; // Will be calibrated
+    this.speechThreshold = 500; 
     this.silenceThreshold = 200;
     
     this.state = "CALIBRATING";
     
     // Noise Rejection:
-    this.minSpeechFrames = 8; // Ignore clicks (need ~160ms sustained speech)
-    this.hangoverFrames = 60; // Wait ~1.2s of silence before stopping (prevents fragmentation)
-    
+    this.minSpeechFrames = 8; 
+    this.hangoverFrames = 60; 
     this.speechCount = 0;
     this.silenceCount = 0;
     
     this.noiseLevels = [];
     this.calibrationCount = 0;
-    this.calibrationMax = 20; // Faster calibration
+    this.calibrationMax = 20; 
   }
 
   process(frameBuffer) {
@@ -32,7 +31,7 @@ class VAD extends EventEmitter {
       this.checkState(energy);
     }
     
-    // Always return boolean for external usage
+
     return this.state === "SPEAKING";
   }
 
@@ -55,10 +54,9 @@ class VAD extends EventEmitter {
 
       this.noiseFloor = avg;
       
-      // Standard VAD Ratio
-      // Boosted minimum to 500 to aggressively filter background noise
+      
       this.speechThreshold = Math.max(avg * 3.5, 500); 
-      this.silenceThreshold = this.speechThreshold * 0.7; // Tighter hysteresis
+      this.silenceThreshold = this.speechThreshold * 0.7; 
 
       console.log(`[VAD] Calibrated: Floor=${avg.toFixed(0)}, Speech=${this.speechThreshold.toFixed(0)}`);
       this.state = "SILENCE";
@@ -67,15 +65,13 @@ class VAD extends EventEmitter {
   }
 
   checkState(energy) {
-    // Logic: 
-    // If SILENCE -> Look for Speech
-    // If SPEAKING -> Look for Silence
+  
     
     if (this.state === "SILENCE") {
         if (energy > this.speechThreshold) {
             this.speechCount++;
         } else {
-            this.speechCount = 0; // Reset immediately if dip
+            this.speechCount = 0; 
         }
 
         if (this.speechCount >= this.minSpeechFrames) {
@@ -88,7 +84,7 @@ class VAD extends EventEmitter {
         if (energy < this.silenceThreshold) {
             this.silenceCount++;
         } else {
-            this.silenceCount = 0; // Reset if spike
+            this.silenceCount = 0; 
         }
 
         if (this.silenceCount >= this.hangoverFrames) {
@@ -104,7 +100,7 @@ class VAD extends EventEmitter {
       if (!this.noiseFloor) return;
       
       if (mode === "speaking") {
-          // STRICT Barge-In: High threshold to ignore echo
+          
           this.speechThreshold = 4000; 
           this.silenceThreshold = 1000;
           // console.log(`[VAD] Mode: SPEAKING (Thresh: 4000)`);
