@@ -7,8 +7,7 @@ const { streamGroq, classifyIntent } = require("./llm/groq");
 const { searchWeb } = require("./search");
 const { saveSession } = require("./persistence");
 const redis = require("./redis");
-
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 const FRAME_SIZE = 640;
 
 const wss = new WebSocket.Server({ port: PORT });
