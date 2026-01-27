@@ -1,139 +1,143 @@
 # Production Voice Agent (Node.js + Audio Cascade)
-
-A production-ready, low-latency voice assistant utilizing a cascading architecture to achieve <500ms response times. Features real-time web search, dynamic context injection, and robust full-duplex communication with barge-in support.
-
-## 🚀 Setup Instructions
+## Setup Instructions
 
 ### Prerequisites
-- Node.js v18 or higher
-- Deepgram API Key (STT/TTS)
-- Groq API Key (LLM)
-- Tavily API Key (Web Search)
 
-### Installation
-1.  **Clone the Repository**
-    ```bash
-    git clone <repo-url>
-    cd voice-agent
-    ```
+- **Node.js**: v18+ (tested on Node 18.x)
+- **npm**: v9+
+- **Redis**: v7+ (used for session persistence and conversation memory)
+- **Browser**: Chrome or Edge (Web Audio API required)
+- **Operating System**: Tested on macOS (should work on Linux; Windows not tested)
 
-2.  **Install Dependencies**
-    ```bash
-    cd backend && npm install
-    # Frontend has no build step (Vanilla JS), just serves via backend
-    ```
-
-3.  **Environment Configuration**
-    Create `backend/.env` with:
-    ```env
-    DEEPGRAM_API_KEY=your_key_here
-    GROQ_API_KEY=your_key_here
-    TAVILY_API_KEY=your_key_here
-    ```
-
-4.  **Run Locally**
-    ```bash
-    # Start the backend server (serves frontend at http://localhost:3001)
-    node backend/src/server.js
-    ```
-5.  **Access**
-    Open `http://localhost:3001` in Chrome/Edge (requires Microphone permission).
+**Optional**
+- Docker (recommended for running Redis in production or cloud environments)
 
 ---
 
-## 🏗 Architecture Overview
+### Installation Steps
 
-### High-Level Design
-The system uses a **Stateful WebSocket Server** architecture. Each connection spawns an isolated `Session` object that manages the audio streams and conversation history.
+Clone the repository:
 
-```
-[Browser] <===(WebSocket)===> [Node.js Server]
-    |                               ^
-    | (Mic PCM)                     | (Session Manager)
-    v                               v
-[VAD Module] --(Trigger)--> [STT Manager] --(Text)--> [Intent Classifier]
-                                    |                       |
-                                    v                       v
-                              [Deepgram SDK]          [Web Search Module]
-                                    |                       |
-                                    v                       v
-                              [Groq LLM] <--(Context)-- [Results]
-                                    |
-                                    v (Stream)
-                              [Sentence Buffer]
-                                    |
-                                    v (Text Chunk)
-                              [TTS Manager]
-                                    |
-                                    v (Audio)
-[Browser Player] <--(PCM)-- [Deepgram Aura]
+```bash
+git clone <your-repo-url>
+cd voice-agent
 ```
 
-### Key Components
+Install backend dependencies:
 
-1.  **Custom VAD (`vad.js`)**:
-    - Implements an energy-based Voice Activity Detector with dynamic thresholds.
-    - Uses a "Hangover" buffer (800ms) to prevent cutting off users during brief pauses.
-    - Differentiates between "Speech Start" (Interrupt/Barge-In) and "Speech Stop" (Turn End).
+```bash
+cd backend
+npm install
+```
+The frontend is built using plain HTML, CSS, and JavaScript (no framework or build step required):
+```bash
+cd ../frontend
+```
+---
+### How to Run Locally
 
-2.  **Cascade Pipeline**:
-    - **Optimistic Execution**: STT streams continuously.
-    - **Intent Classification**: Runs in parallel with the "Thinking" state.
-    - **Sentence Buffering**: LLM tokens are buffered until a full sentence delimiter (`.`, `?`, `!`) is detected to ensure natural TTS intonation.
+Start Redis (only if persistence is required):
 
-3.  **Multi-User Management**:
-    - Server uses a factory pattern for Sessions.
-    - All state (`history`, `audioBuffer`, `transcript`) is encapsulated within the closure of the WebSocket connection, ensuring 100% isolation between users.
+```bash
+redis-server
+```
+
+Start the backend server:
+
+```bash
+cd backend
+node src/server.js
+```
+
+Run the frontend:
+
+- Open `frontend/index.html` directly in Chrome or Edge
+- Allow microphone access when prompted
+- Start speaking to the voice agent
+
+The backend will run on port `3001` by default.
+
+### Architecture Overview
+![Voice Agent Architecture](./assets/architecture-diagram.png)
+
+This system is built as a real-time cascaded voice pipeline where each stage has a single, clearly defined responsibility. Audio is captured in the browser using the Web Audio API with basic echo cancellation and noise suppression enabled, then streamed to the backend over WebSockets for low-latency processing.
+
+On the backend, every client connection is treated as an isolated session. Incoming audio first passes through a custom Voice Activity Detection (VAD) layer with adaptive thresholds, which identifies speech start, speech end, and turn boundaries. Once a turn is finalized, audio is forwarded to the Speech-to-Text (STT) manager, and the resulting transcript becomes the source of truth for the rest of the pipeline.
+
+The transcribed text is routed through the LLM orchestration layer, where intent is identified and tools such as web search are conditionally invoked if required. The final response is split into sentence-sized chunks and sent to the Text-to-Speech (TTS) service. Each sentence is synthesized as a fully buffered WAV file to prioritize stability and audio correctness.
+
+On the frontend, audio segments are played sequentially using a single AudioContext. Playback is strictly ordered, and barge-in is handled by immediately stopping the active audio source and clearing the queue when user speech is detected again.
+
+Multi-user support is achieved through strict session isolation and lightweight per-session state management. Conversation context and metadata can be persisted in Redis, allowing sessions to survive reconnects and enabling future horizontal scaling. Context updates can be injected into an active session at runtime, and all subsequent turns immediately reflect the updated context without restarting the pipeline.
+
+
+## Design Decisions
+
+- **Speech-to-Text (Deepgram)**  
+  I chose Deepgram mainly because it offers reliable real-time streaming with predictable endpointing behavior. While testing different STT providers, I noticed that small inconsistencies in partial transcripts or end-of-speech detection had a huge impact on the overall conversation flow. Deepgram felt stable enough to build custom VAD and turn-detection logic on top of, which mattered more to me than marginal accuracy gains.
+
+- **Language Model (Groq)**  
+  Groq stood out because of how fast it responds. In a voice-based system, the silence between the user finishing a sentence and the assistant reacting is immediately noticeable. Groq’s low time-to-first-token made conversations feel responsive without needing aggressive streaming tricks, which aligned well with the reliability-first approach I eventually adopted.
+
+- **Text-to-Speech Strategy (Buffered WAV per Sentence)**  
+  I initially experimented with streaming MP3, WAV, and even raw PCM audio to minimize latency. In practice, this caused frequent issues when combined with web search or slower LLM responses. After multiple failures, I switched to generating fully buffered WAV audio per sentence. This decision significantly improved audio stability and removed mid-speech cutoffs, even though it slightly increased overall latency.
+
+- **Real-Time Communication (WebSockets)**  
+  WebSockets were used throughout the system because the application requires continuous, bidirectional communication. They allow audio streaming, control signals (barge-in, stop, context updates), and transcript updates to happen over a single persistent connection without reconnecting or blocking other parts of the pipeline.
+
+- **State-Based Flow Instead of Flags**  
+  Early versions relied on simple flags like `isSpeaking` or `isListening`, which quickly became error-prone as features like barge-in and web search were added. Refactoring the system into a clear state-driven flow made the behavior easier to reason about and eliminated many race conditions that appeared under real usage.
 
 ---
 
-## 💡 Design Decisions
+## Performance Analysis
 
-### 1. Why Single-Process Node.js?
-Node.js is ideal for this I/O-bound workload. We are not doing heavy CPU processing (STT/TTS are offloaded). A single node process can comfortably handle 500+ concurrent streams before needing clustering, keeping deployment simple.
+- **Latency Characteristics**  
+  The system consistently achieves low time-to-first-token from the LLM (typically under 150ms) and completes full conversational turns within a few seconds, depending on response length. While it is not aggressively optimized for the absolute lowest latency, it feels responsive and consistent during real conversations.
 
-### 2. Provider Choices
-- **Groq (Model: Llama 3 70B)**: Chosen for its unmatched T/s (Tokens per second). Latency is the #1 KPI.
-- **Deepgram (Nova-2 + Aura)**: Chosen for the fastest "Time-to-First-Byte" in the industry for both recognition and synthesis.
+- **Observed Bottlenecks**  
+  The biggest performance challenges appeared when web search was introduced. External API calls introduced unavoidable delays, which conflicted with earlier streaming-based audio assumptions and resulted in awkward silence or partially spoken responses.
 
-### 3. Audio format (Int16 PCM)
-We transmit raw PCM (16kHz, Mono) over WebSockets. This avoids the overhead of MP3/Opus encoding checks on the server and provides the lowest possible latency for the VAD and STT engines.
+- **How Bottlenecks Were Addressed**  
+  I restructured the pipeline so that “thinking” and “speaking” are clearly separated. Audio playback only begins once all required data is ready. This removed unpredictable pauses and made latency easier to measure and reason about.
 
-### 4. Persistence Strategy
-Sessions are saved to JSON files on close (`backend/sessions/`). This was chosen over a database (SQL/Mongo) for this iteration to reduce deployment dependencies (keeping the artifact being just "Node.js code"), while still satisfying the requirement to persist data.
-
----
-
-## 📊 Performance Analysis
-
-### Latency Budget (Typical Turn)
-| Component | Duration | Note |
-|T---|---|---|
-| **VAD Hangover** | 800ms | Deliberate wait for sentence finish |
-| **STT Finalize** | 200ms | Deepgram finalizing result |
-| **Intent Check** | 150ms | Parallel execution |
-| **LLM TTFT** | 300ms | Groq Llama 3 First token |
-| **TTS Generation**| 250ms | Deepgram Aura First byte |
-| **Total Response**| **~1.7s** | Feels immediate after the pause |
-
-*Note: Barge-in latency is <300ms (VAD Trigger -> Audio Kill Command).*
-
-### Bottlenecks
-- **Network Jitter**: Clients on poor WiFi may experience packet loss impacting VAD.
-- **TTS Generation**: Generating long sentences adds latency. **Addressed by**: Streaming sentences one by one as they complete.
+- **Instrumentation and Debugging**  
+  Every turn logs structured timing information for STT, LLM, TTS, and total latency. This made it possible to debug real issues using data rather than intuition, and helped guide architectural decisions instead of guessing.
 
 ---
 
-## 🔮 Tradeoffs & Future Work
+## Scalability Considerations
 
-- **Tradeoff**: We prioritized **Latency** over **Complexity**. We use basic In-Memory session management instead of Redis, meaning a server restart kills active calls.
-  - *Mitigation*: Implementation of Redis Store would handle scaling.
-- **Tradeoff**: We use **Energy VAD** vs **Model VAD**. Energy is faster (0ms latency), but Model VAD is more accurate in noisy environments.
-  - *Future Work*: Integrate Silero VAD (ONNX) for better noise resilience.
-- **Future Work**: Implement **Smart Caching**. Queries like "Hello" should have 0ms LLM latency by replying from cache.
+- **Concurrent Sessions**  
+  Each user connection is treated as a fully isolated session with its own state, transcript history, and audio streams. There is no shared mutable state between users, which prevents context bleed and makes concurrent usage safe.
+
+- **Event-Driven Backend Design**  
+  The backend is primarily IO-bound and uses Node.js’s event loop efficiently. Since no heavy processes are spawned per user, the system can handle many concurrent sessions without significant overhead.
+
+- **Scaling Beyond a Single Instance**  
+  For larger scale, the system can be horizontally scaled by running multiple backend instances behind a load balancer. Redis is already integrated for session persistence, which would allow sessions to survive reconnects across instances.
+
+- **Efficiency Tradeoffs**  
+  The choice to buffer audio and avoid aggressive streaming slightly increases latency but reduces retries, errors, and wasted computation, resulting in more predictable resource usage overall.
 
 ---
 
-## 📦 Deployment
-This codebase effectively deploys to any containerized environment (Render, Railway, AWS ECS).
-**Live Demo**: [Insert URL Here]
+## Tradeoffs & Future Work
+
+- **What I Optimized For**  
+  I prioritized correctness, stability, and conversational clarity over raw speed. A slightly slower response that completes cleanly felt far more natural than fast but glitchy audio.
+
+- **What I Intentionally Avoided**  
+  Ultra-aggressive streaming and partial audio decoding were deliberately removed after causing repeated failures. While technically impressive, they made the system fragile and difficult to debug.
+
+- **Current Limitations**  
+  Noise suppression is still minimal and mostly handled on the client side. Turn detection relies on silence rather than semantic understanding, and provider fallback is architecturally present but not fully implemented.
+
+- **Next Improvements**  
+  With more time, I would add semantic turn completion checks, stronger server-side noise filtering, proper multi-provider STT fallback, and caching for repeated queries to reduce unnecessary LLM calls.
+
+---
+
+## Engineering Journey (Brief)
+
+This project started as a straightforward voice pipeline and slowly evolved into a lesson in system design. Each new feature—especially web search—forced me to rethink earlier assumptions about streaming, latency, and control flow. Several iterations failed in subtle ways before I shifted from a “stream everything as fast as possible” mindset to one focused on predictability and state control. Most of the current architecture exists because earlier versions broke under real usage, and each failure helped shape a more stable and understandable system.
