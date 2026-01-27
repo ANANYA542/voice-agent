@@ -1,4 +1,4 @@
-import { callGroq } from "./src/llm/groq.js";
+import { callGroq } from "../src/llm/groq.js";
 import "dotenv/config";
 
 async function run() {

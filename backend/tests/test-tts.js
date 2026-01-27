@@ -1,6 +1,6 @@
 require("dotenv").config();
 const fs = require("fs");
-const { createDeepgramTTS } = require("./src/tts/deepgram");
+const { createDeepgramTTS } = require("../src/tts/deepgram");
 
 async function run() {
   const text = "Hello Ananya, your voice agent is now speaking.";
