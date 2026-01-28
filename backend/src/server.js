@@ -9,11 +9,6 @@ const { saveSession } = require("./persistence");
 const redis = require("./redis");
 const PORT = process.env.PORT || 3001;
 const FRAME_SIZE = 640;
-const express = require("express");
-const app = express();
-app.get("/", (req, res) => {
-  res.status(200).send("OK");
-});
 
 const wss = new WebSocket.Server({ port: PORT });
 console.log(`Server started on port ${PORT}`);
