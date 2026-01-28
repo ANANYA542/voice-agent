@@ -7,7 +7,7 @@ async function searchWeb(query) {
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 1500); 
+  const timeoutId = setTimeout(() => controller.abort(), 3000); 
   try {
     const res = await fetch("https://api.tavily.com/search", {
       method: "POST",
@@ -28,7 +28,7 @@ async function searchWeb(query) {
     return data.answer || "";
   } catch (error) {
     if (error.name === 'AbortError') {
-      throw new Error("Search timed out (>800ms)");
+      throw new Error("Search timed out (>3000ms)"); 
     }
     throw error;
   }

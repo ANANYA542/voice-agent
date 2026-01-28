@@ -5,10 +5,15 @@ class RedisManager {
         this.enabled = false;
         this.client = null;
    
-        const url = process.env.REDIS_URL || 'redis://localhost:6379';
+        const url = process.env.REDIS_URL;
+        if (!url) {
+            console.warn("[Redis] REDIS_URL not set. Persistence disabled.");
+            return;
+        }
         
         try {
             this.client = new Redis(url, {
+                tls:{},
                 maxRetriesPerRequest: 1, 
                 retryStrategy: (times) => {
                   

@@ -7,6 +7,9 @@ function saveSession(session) {
     }
 
     const sessionDir = path.join(__dirname, "../sessions");
+    if (!fs.existsSync(sessionDir)) {
+        fs.mkdirSync(sessionDir, { recursive: true });
+    }
     const filename = `session_${session.id}_${Date.now()}.json`;
     const filePath = path.join(sessionDir, filename);
 

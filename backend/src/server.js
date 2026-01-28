@@ -431,7 +431,7 @@ wss.on("connection", async (ws, req) => {
     waitForText();
   });
 
-  ws.on("message", (data) => {
+  ws.on("message", async (data) => {
     try {
         const msg = JSON.parse(data.toString());
         if (msg.type === "user_stop") {
@@ -443,8 +443,51 @@ wss.on("connection", async (ws, req) => {
             if (msg.context && typeof msg.context === "string") {
                 session.context = msg.context;
                 log(session, "context_updated", { new_context_preview: session.context.substring(0, 50) });
-            
                 redis.saveSession(session.id, session);
+
+                // --- TRIGGER ACKNOWLEDGEMENT ---
+                // We treat this as a system-triggered turn to verbally confirm the change.
+                session.state = "THINKING";
+                session.turn.id++;
+                const turnId = session.turn.id;
+                
+                // Clear any playing audio
+                ws.send(JSON.stringify({ type: "turn_reset", turnId }));
+                ws.send(JSON.stringify({ type: "state_thinking", turnId }));
+
+                const messages = [
+                  { 
+                    role: "system", 
+                    content: `${session.context}\n\n[SYSTEM EVENT]: The user just updated your core instructions/persona to the text above. You must now strictly act as this persona. Briefly acknowledge this change to the user in 1 sentence, in character.` 
+                  }
+                ];
+
+                try {
+                    const stream = await streamGroq(messages);
+                    let fullResponse = "";
+                    
+                    for await (const token of stream) {
+                       fullResponse += token;
+                    }
+                    
+                    // We just send the full response as one sentence for speed/simplicity here
+                    if (fullResponse.trim().length > 0) {
+                        await processAndSendSentence(session, ws, turnId, fullResponse.trim(), 0);
+                        ws.send(JSON.stringify({ type: "tts_end", turnId }));
+                        
+                        // Add to history so the flow continues naturally
+                        session.history.push({ role: "system", content: `Context updated. Agent acknowledged: "${fullResponse}"` });
+                    }
+                    
+                    session.tts.status = "idle";
+                    session.state = "IDLE";
+                    session.vad.setMode("listening");
+                    ws.send(JSON.stringify({ type: "state_listening", turnId }));
+
+                } catch (e) {
+                    log(session, "context_ack_error", { error: e.message });
+                    session.state = "IDLE";
+                }
             }
             return;
         }

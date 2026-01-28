@@ -78,11 +78,11 @@ function stopAI() {
 
 function connect() {
   // Session Persistence logic
-  let ssid = localStorage.getItem("voice_session_id");
-  if (!ssid) {
-    ssid = Math.random().toString(36).substring(2) + Date.now().toString(36);
-    localStorage.setItem("voice_session_id", ssid);
-  }
+  // DEMO MODE: Always generate a new Session ID to demonstrate Multi-User Isolation
+  // local storage retrieval is disabled to ensure every tab/refresh is a fresh user.
+  let ssid = Math.random().toString(36).substring(2) + Date.now().toString(36);
+  // localStorage.setItem("voice_session_id", ssid); 
+
 
   console.log("Connecting with Session ID:", ssid);
   ws = new WebSocket(`ws://localhost:3001?sessionId=${ssid}`);
