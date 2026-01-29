@@ -85,7 +85,8 @@ function connect() {
 
 
   console.log("Connecting with Session ID:", ssid);
-  ws = new WebSocket(`wss://voice-agent-icq3.onrender.com?sessionId=${ssid}`);
+  ws = new WebSocket(`${APP_CONFIG.WS_URL}?sessionId=${ssid}`);
+  // ws = new WebSocket(`wss://voice-agent-1-z2r3.onrender.com?sessionId=${ssid}`);
 
   ws.onopen = () => {
     // Initialize Connection

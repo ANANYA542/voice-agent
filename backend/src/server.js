@@ -14,6 +14,16 @@ const FRAME_SIZE = 640;
 
 // Create HTTP Serve for Render Health Checks & WS Upgrade
 const server = http.createServer((req, res) => {
+    // Add CORS Headers
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'OPTIONS, GET');
+    
+    if (req.method === 'OPTIONS') {
+        res.writeHead(204);
+        res.end();
+        return;
+    }
+
     if (req.method === 'GET' && req.url === '/') {
         res.writeHead(200);
         res.end('Voice Agent Backend Running (Health Check OK)');
