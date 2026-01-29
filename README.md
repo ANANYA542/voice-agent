@@ -55,7 +55,14 @@ Run the frontend:
 - Allow microphone access when prompted
 - Start speaking to the voice agent
 
+
 The backend will run on port `3001` by default.
+
+### Deployment Notes (Render Free Tier)
+
+The backend is deployed on Render using the free instance tier. Free instances on Render automatically spin down after periods of inactivity, which can cause the first request after idle time to feel slightly slower. This behavior is expected and was taken into account during development and testing.
+
+No paid credits were used during this project. All features were implemented and validated within free-tier constraints to reflect a realistic production scenario where cost efficiency matters. The system is designed such that upgrading to a paid instance would immediately improve cold-start latency without requiring any architectural changes.
 
 ### Architecture Overview
 ![Voice Agent Architecture](./assets/architecture-diagram.png)
