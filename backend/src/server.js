@@ -1,5 +1,6 @@
 require("dotenv").config();
 const WebSocket = require("ws");
+const http = require("http");
 const STTManager = require("./stt/manager");
 const VAD = require("./vad");
 const { streamTextToSpeech, generateAudio } = require("./tts/deepgram");
@@ -10,8 +11,24 @@ const redis = require("./redis");
 const PORT = process.env.PORT || 3001;
 const FRAME_SIZE = 640;
 
-const wss = new WebSocket.Server({ port: PORT });
-console.log(`Server started on port ${PORT}`);
+
+// Create HTTP Serve for Render Health Checks & WS Upgrade
+const server = http.createServer((req, res) => {
+    if (req.method === 'GET' && req.url === '/') {
+        res.writeHead(200);
+        res.end('Voice Agent Backend Running (Health Check OK)');
+    } else {
+        res.writeHead(404);
+        res.end();
+    }
+});
+
+// Bind WS to the HTTP server
+const wss = new WebSocket.Server({ server });
+
+server.listen(PORT, () => {
+    console.log(`Server started on port ${PORT}`);
+});
 
 // --- HELPER FUNCTIONS ---
 
