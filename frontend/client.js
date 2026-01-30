@@ -78,10 +78,14 @@ function stopAI() {
 
 function connect() {
   // Session Persistence logic
-  // DEMO MODE: Always generate a new Session ID to demonstrate Multi-User Isolation
-  // local storage retrieval is disabled to ensure every tab/refresh is a fresh user.
-  let ssid = Math.random().toString(36).substring(2) + Date.now().toString(36);
-  // localStorage.setItem("voice_session_id", ssid); 
+  // We use sessionStorage so that:
+  // 1. Refreshing this tab RESTORES the session (User sees history).
+  // 2. Opening a NEW tab creates a NEW session (Multi-user demo works).
+  let ssid = sessionStorage.getItem("voice_session_id");
+  if (!ssid) {
+    ssid = Math.random().toString(36).substring(2) + Date.now().toString(36);
+    sessionStorage.setItem("voice_session_id", ssid);
+  } 
 
 
   console.log("Connecting with Session ID:", ssid);
